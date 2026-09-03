@@ -8,6 +8,12 @@ Deploy: copy to /opt/awg_agent.py on the VPS and run under systemd (see
 `awg-agent.service` example in README.md). Runs on 0.0.0.0:9443 with TLS
 (reuse the same cert as the panel) and a bearer-token auth check.
 
+The obfuscation parameters below (Jc/Jmin/Jmax/S1-S4/H1-H4/I1-I3, plus MTU
+and PresharedKey) must exactly match the server interface's own awg0.conf —
+see TZ 3.2's postmortem on the Windows-client connectivity issue this fixed.
+If you change the server's [Interface] block, update the constants here too
+and reissue every peer (existing configs will stop matching otherwise).
+
 Endpoints:
   GET    /health             liveness check
   POST   /peers               {"label": "<subscription id>"} -> creates a peer,
@@ -49,6 +55,17 @@ TOKEN = os.environ["AWG_AGENT_TOKEN"]
 CERT_FILE = os.environ["AWG_TLS_CERTFILE"]
 KEY_FILE = os.environ["AWG_TLS_KEYFILE"]
 
+# Must mirror the [Interface] block in awg0.conf exactly.
+CLIENT_PARAMS = (
+    "MTU = 1280\n"
+    "Jc = 9\nJmin = 30\nJmax = 90\nS1 = 110\nS2 = 120\nS3 = 47\nS4 = 23\n"
+    "H1 = 5000000-10000000\nH2 = 10000001-20000000\n"
+    "H3 = 20000001-30000000\nH4 = 30000001-40000000\n"
+    "I1 = <b 0x0003><r 2><b 0x2112A442><r 12><r 20>\n"
+    "I2 = <b 0x0103><r 2><b 0x2112A442><r 12><r 24>\n"
+    "I3 = <b 0x0008><r 2><b 0x2112A442><r 12><r 16>\n"
+)
+
 _lock = threading.Lock()
 
 
@@ -72,8 +89,8 @@ def _next_free_ip(state: dict) -> str:
     raise RuntimeError("address pool exhausted")
 
 
-def _run(cmd: list[str]) -> str:
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+def _run(cmd: list[str], input_data: str | None = None) -> str:
+    result = subprocess.run(cmd, input=input_data, capture_output=True, text=True, check=True)
     return result.stdout.strip()
 
 
@@ -81,14 +98,16 @@ def create_peer(label: str) -> dict:
     with _lock:
         state = _load_state()
         priv = _run([AWG_BIN, "genkey"])
-        pub = subprocess.run(
-            [AWG_BIN, "pubkey"], input=priv, capture_output=True, text=True, check=True
-        ).stdout.strip()
+        pub = _run([AWG_BIN, "pubkey"], input_data=priv)
+        psk = _run([AWG_BIN, "genpsk"])
         ip = _next_free_ip(state)
 
-        _run([AWG_BIN, "set", INTERFACE, "peer", pub, "allowed-ips", f"{ip}/32"])
+        _run([
+            AWG_BIN, "set", INTERFACE, "peer", pub,
+            "preshared-key", "/dev/stdin", "allowed-ips", f"{ip}/32",
+        ], input_data=psk)
 
-        state["peers"][pub] = {"label": label, "ip": ip}
+        state["peers"][pub] = {"label": label, "ip": ip, "psk": psk}
         _save_state(state)
         _persist_conf(state)
 
@@ -97,10 +116,10 @@ def create_peer(label: str) -> dict:
             f"Address = {ip}/24\n"
             "DNS = 1.1.1.1, 8.8.8.8\n"
             f"PrivateKey = {priv}\n"
-            "Jc = 4\nJmin = 40\nJmax = 70\nS1 = 68\nS2 = 88\n"
-            "H1 = 1234567\nH2 = 2345678\nH3 = 3456789\nH4 = 4567890\n\n"
+            f"{CLIENT_PARAMS}\n"
             "[Peer]\n"
             f"PublicKey = {SERVER_PUBLIC_KEY}\n"
+            f"PresharedKey = {psk}\n"
             f"Endpoint = {SERVER_ENDPOINT}\n"
             "AllowedIPs = 0.0.0.0/0, ::/0\n"
             "PersistentKeepalive = 25\n"
@@ -127,7 +146,8 @@ def _persist_conf(state: dict) -> None:
     header = content.split("[Peer]")[0].rstrip() + "\n"
     blocks = [header]
     for pub, info in state["peers"].items():
-        blocks.append(f"\n[Peer]\nPublicKey = {pub}\nAllowedIPs = {info['ip']}/32\n")
+        psk_line = f"PresharedKey = {info['psk']}\n" if info.get("psk") else ""
+        blocks.append(f"\n[Peer]\nPublicKey = {pub}\n{psk_line}AllowedIPs = {info['ip']}/32\n")
     with open(CONF_FILE, "w") as f:
         f.write("".join(blocks))
 

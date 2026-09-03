@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import random
+import string
+
 from aiogram import Router, F
 from aiogram.types import BufferedInputFile, CallbackQuery
 from sqlalchemy import select, func
@@ -11,6 +14,11 @@ from bot.keyboards.client import back_to_menu, manage_keyboard, profile_keyboard
 from bot.services.subscriptions import get_or_create_subscription, switch_protocol
 
 router = Router(name="profile")
+
+
+def random_config_filename() -> str:
+    suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    return f"NetherlMarsi[{suffix}].conf"
 
 PROTOCOL_LABELS = {
     "amnezia": "AmneziaWG (маскировка)",
@@ -94,7 +102,7 @@ async def get_config(callback: CallbackQuery, session: AsyncSession) -> None:
         if sub.protocol in ("amnezia", "wireguard")
         else "ℹ️ Ограничение на 1 устройство для этого протокола пока не действует."
     )
-    file = BufferedInputFile(sub.awg_config.encode(), filename="vpnmarsi.conf")
+    file = BufferedInputFile(sub.awg_config.encode(), filename=random_config_filename())
     await callback.message.answer_document(
         file,
         caption=(

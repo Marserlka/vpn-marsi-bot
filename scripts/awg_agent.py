@@ -60,15 +60,16 @@ TOKEN = os.environ["AWG_AGENT_TOKEN"]
 CERT_FILE = os.environ["AWG_TLS_CERTFILE"]
 KEY_FILE = os.environ["AWG_TLS_KEYFILE"]
 
-# Must mirror the [Interface] block in awg0.conf exactly.
+# Must mirror the [Interface] block in awg0.conf exactly. Note: S3/S4 and
+# H1-H4-as-a-range are a newer AmneziaWG protocol addition that some client
+# app builds don't understand yet — one such client rejected S3 outright
+# ("Неверный ключ для секции [Interface]: s3") even though our server-side
+# tools support it. Stick to the widely-supported subset: MTU, PresharedKey
+# (set per-peer below), Jc/Jmin/Jmax/S1/S2, and single-value H1-H4.
 CLIENT_PARAMS = (
     "MTU = 1280\n"
-    "Jc = 9\nJmin = 30\nJmax = 90\nS1 = 110\nS2 = 120\nS3 = 47\nS4 = 23\n"
-    "H1 = 5000000-10000000\nH2 = 10000001-20000000\n"
-    "H3 = 20000001-30000000\nH4 = 30000001-40000000\n"
-    "I1 = <b 0x0003><r 2><b 0x2112A442><r 12><r 20>\n"
-    "I2 = <b 0x0103><r 2><b 0x2112A442><r 12><r 24>\n"
-    "I3 = <b 0x0008><r 2><b 0x2112A442><r 12><r 16>\n"
+    "Jc = 9\nJmin = 30\nJmax = 90\nS1 = 110\nS2 = 120\n"
+    "H1 = 5000000\nH2 = 10000001\nH3 = 20000001\nH4 = 30000001\n"
 )
 
 _lock = threading.Lock()

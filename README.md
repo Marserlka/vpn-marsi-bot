@@ -31,7 +31,7 @@ python -m bot.main
 
 ## AmneziaWG-агент на сервере (обязательно для выдачи ключей)
 
-У AmneziaWG нет REST API, поэтому на VPS рядом с интерфейсом `awg0` крутится маленький HTTP-сервис `scripts/awg_agent.py` (systemd unit `awg-agent.service`, порт 9443, TLS на том же сертификате, что и панель). Бот дёргает его через `bot/services/awg_agent.py`:
+У AmneziaWG нет REST API, поэтому на VPS рядом с интерфейсом `awg0` крутится маленький HTTP-сервис `scripts/awg_agent.py` (systemd unit `awg-agent.service`, порт **443** — специально, а не 9443: многие хостинги ботов, включая BotHost, блокируют исходящие на нестандартные порты, из-за чего вызовы агента падали с `httpx.ConnectTimeout`; TLS на том же сертификате, что и панель). Бот дёргает его через `bot/services/awg_agent.py`:
 - `POST /peers {"label": "..."}` — создаёт нового пира, возвращает готовый `.conf`.
 - `DELETE /peers/<pubkey>` — удаляет пира (когда подписка истекла/отключена админом).
 

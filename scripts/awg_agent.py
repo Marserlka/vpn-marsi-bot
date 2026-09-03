@@ -5,8 +5,13 @@ Marzban has no native WireGuard support (see TZ 3.2 for why AmneziaWG became
 the primary protocol).
 
 Deploy: copy to /opt/awg_agent.py on the VPS and run under systemd (see
-`awg-agent.service` example in README.md). Runs on 0.0.0.0:9443 with TLS
-(reuse the same cert as the panel) and a bearer-token auth check.
+`awg-agent.service` example in README.md). Runs on 0.0.0.0:443 by default
+(AWG_AGENT_PORT to override) with TLS (reuse the same cert as the panel)
+and a bearer-token auth check. Port 443 is deliberate: some bot hosts
+(BotHost included) block outbound connections to non-standard ports, and
+443 is the one port that's essentially always allowed through — the
+symptom is an httpx.ConnectTimeout from the bot with the agent otherwise
+healthy (see TZ 3.2 "Урок №3").
 
 The obfuscation parameters below (Jc/Jmin/Jmax/S1-S4/H1-H4/I1-I3, plus MTU
 and PresharedKey) must exactly match the server interface's own awg0.conf —
@@ -205,7 +210,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    server = http.server.ThreadingHTTPServer(("0.0.0.0", 9443), Handler)
+    port = int(os.environ.get("AWG_AGENT_PORT", "443"))
+    server = http.server.ThreadingHTTPServer(("0.0.0.0", port), Handler)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(CERT_FILE, KEY_FILE)
     server.socket = ctx.wrap_socket(server.socket, server_side=True)

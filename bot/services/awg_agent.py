@@ -11,10 +11,9 @@ class AwgAgentError(Exception):
 
 class AwgAgentClient:
     """Talks to the awg_agent service running on the VPS (see scripts/awg_agent.py
-    on the server) which owns the AmneziaWG interface and its peer list.
-    Marzban has no native WireGuard support, so this small sidecar is what
-    lets the bot provision/revoke AmneziaWG peers the same way MarzbanClient
-    provisions VLESS users.
+    on the server) which owns both VPN interfaces we offer — AmneziaWG
+    (obfuscated) and plain WireGuard (native kernel module, faster, no
+    obfuscation) — and their peer lists.
     """
 
     def __init__(self) -> None:
@@ -27,14 +26,14 @@ class AwgAgentClient:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def create_peer(self, label: str) -> dict:
-        resp = await self._client.post("/peers", json={"label": label})
+    async def create_peer(self, label: str, protocol: str = "amnezia") -> dict:
+        resp = await self._client.post("/peers", json={"label": label, "protocol": protocol})
         if resp.status_code != 201:
             raise AwgAgentError(f"create_peer failed: {resp.status_code} {resp.text}")
         return resp.json()
 
-    async def delete_peer(self, public_key: str) -> None:
-        resp = await self._client.delete(f"/peers/{public_key}")
+    async def delete_peer(self, public_key: str, protocol: str = "amnezia") -> None:
+        resp = await self._client.delete(f"/peers/{public_key}", params={"protocol": protocol})
         if resp.status_code not in (200, 404):
             raise AwgAgentError(f"delete_peer failed: {resp.status_code} {resp.text}")
 

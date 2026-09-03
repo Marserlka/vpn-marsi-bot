@@ -28,10 +28,14 @@ def profile_keyboard() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def manage_keyboard(has_config: bool) -> InlineKeyboardMarkup:
+def manage_keyboard(has_config: bool, is_active: bool, protocol: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     if has_config:
         kb.button(text="📥 Получить конфиг", callback_data="menu:get_config")
+    if is_active:
+        other = "wireguard" if protocol == "amnezia" else "amnezia"
+        other_label = "WireGuard (быстрее)" if other == "wireguard" else "AmneziaWG (маскировка)"
+        kb.button(text=f"🔀 Сменить протокол на {other_label}", callback_data=f"menu:switch_protocol:{other}")
     kb.button(text="🌐 Создать / продлить подключение", callback_data="menu:buy")
     kb.button(text="⬅️ Главное меню", callback_data="menu:main")
     kb.adjust(1)

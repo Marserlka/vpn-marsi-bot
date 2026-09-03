@@ -8,9 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import settings
 from bot.database.models import Payment, ReferralBonus, Subscription, User
 from bot.keyboards.client import back_to_menu, manage_keyboard, profile_keyboard
-from bot.services.subscriptions import get_or_create_subscription
+from bot.services.subscriptions import get_or_create_subscription, switch_protocol
 
 router = Router(name="profile")
+
+PROTOCOL_LABELS = {"amnezia": "AmneziaWG (маскировка)", "wireguard": "WireGuard (скорость)"}
+PROTOCOL_APP = {
+    "amnezia": "приложение AmneziaVPN",
+    "wireguard": "официальное приложение WireGuard",
+}
 
 
 def _status_line(sub: Subscription) -> str:
@@ -41,11 +47,16 @@ async def manage(callback: CallbackQuery, session: AsyncSession) -> None:
     text = (
         f"⚙️ Управление подключениями\n\n"
         f"{_status_line(sub)}\n"
-        f"Протокол: AmneziaWG\n\n"
+        f"Протокол: {PROTOCOL_LABELS.get(sub.protocol, sub.protocol)}\n\n"
         f"⚠️ 1 подписка предназначена только для 1 устройства. При одновременном "
         f"включении на двух устройствах доступ автоматически блокируется."
     )
-    await callback.message.edit_text(text, reply_markup=manage_keyboard(has_config=bool(sub.awg_config)))
+    await callback.message.edit_text(
+        text,
+        reply_markup=manage_keyboard(
+            has_config=bool(sub.awg_config), is_active=sub.status == "active", protocol=sub.protocol
+        ),
+    )
     await callback.answer()
 
 
@@ -56,18 +67,47 @@ async def get_config(callback: CallbackQuery, session: AsyncSession) -> None:
         await callback.answer("У вас нет активной подписки.", show_alert=True)
         return
 
+    app_name = PROTOCOL_APP.get(sub.protocol, "приложение AmneziaVPN")
     file = BufferedInputFile(sub.awg_config.encode(), filename="vpnmarsi.conf")
     await callback.message.answer_document(
         file,
         caption=(
-            "Ваш конфиг AmneziaWG.\n\n"
-            "1. Установите приложение AmneziaVPN.\n"
+            f"Ваш конфиг ({PROTOCOL_LABELS.get(sub.protocol, sub.protocol)}).\n\n"
+            f"1. Установите {app_name}.\n"
             "2. «Добавить конфигурацию» → «Импортировать из файла» → выберите этот файл.\n"
             "3. Подключитесь.\n\n"
             "⚠️ 1 подписка = 1 устройство."
         ),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("menu:switch_protocol:"))
+async def switch_protocol_handler(callback: CallbackQuery, session: AsyncSession) -> None:
+    new_protocol = callback.data.split(":")[-1]
+    try:
+        sub = await switch_protocol(session, callback.from_user.id, new_protocol)
+    except ValueError:
+        await callback.answer("Нет активной подписки.", show_alert=True)
+        return
+    except Exception as exc:
+        await callback.answer(f"Ошибка: {exc}", show_alert=True)
+        raise
+
+    await callback.answer(f"Протокол изменён на {PROTOCOL_LABELS.get(new_protocol, new_protocol)}", show_alert=True)
+    text = (
+        f"⚙️ Управление подключениями\n\n"
+        f"{_status_line(sub)}\n"
+        f"Протокол: {PROTOCOL_LABELS.get(sub.protocol, sub.protocol)}\n\n"
+        f"⚠️ 1 подписка предназначена только для 1 устройства. При одновременном "
+        f"включении на двух устройствах доступ автоматически блокируется."
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=manage_keyboard(
+            has_config=bool(sub.awg_config), is_active=sub.status == "active", protocol=sub.protocol
+        ),
+    )
 
 
 @router.callback_query(F.data == "menu:referral")

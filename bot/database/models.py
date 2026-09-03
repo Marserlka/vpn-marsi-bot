@@ -32,6 +32,7 @@ class Subscription(Base):
     subscription_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     awg_public_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     awg_config: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    protocol: Mapped[str] = mapped_column(String(16), default="amnezia")  # amnezia/wireguard
     expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="inactive")  # inactive/active/expired
     reminder_3d_sent: Mapped[bool] = mapped_column(Boolean, default=False)

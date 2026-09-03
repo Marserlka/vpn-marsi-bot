@@ -205,19 +205,22 @@ async def confirm_paid_by_user(callback: CallbackQuery) -> None:
 
 
 async def deliver_config(bot: Bot, session: AsyncSession, user_id: int) -> None:
-    """Sends the user's current AmneziaWG .conf as a document, if they have one."""
+    """Sends the user's current VPN .conf as a document, if they have one."""
     from sqlalchemy import select
+
+    from bot.handlers.profile import PROTOCOL_APP, PROTOCOL_LABELS
 
     sub = await session.scalar(select(Subscription).where(Subscription.user_id == user_id))
     if not sub or not sub.awg_config:
         return
+    app_name = PROTOCOL_APP.get(sub.protocol, "приложение AmneziaVPN")
     file = BufferedInputFile(sub.awg_config.encode(), filename="vpnmarsi.conf")
     await bot.send_document(
         user_id,
         file,
         caption=(
-            "Ваш конфиг AmneziaWG.\n\n"
-            "1. Установите приложение AmneziaVPN.\n"
+            f"Ваш конфиг ({PROTOCOL_LABELS.get(sub.protocol, sub.protocol)}).\n\n"
+            f"1. Установите {app_name}.\n"
             "2. «Добавить конфигурацию» → «Импортировать из файла» → выберите этот файл.\n"
             "3. Подключитесь.\n\n"
             "⚠️ 1 подписка = 1 устройство."

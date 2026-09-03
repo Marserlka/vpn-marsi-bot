@@ -3,10 +3,11 @@ from __future__ import annotations
 import datetime as dt
 
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery
+from aiogram.types import BufferedInputFile, CallbackQuery
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import Payment
+from bot.database.models import Payment, Subscription
 
 router = Router(name="admin_payments")
 
@@ -33,6 +34,20 @@ async def confirm_payment(callback: CallbackQuery, session: AsyncSession, bot: B
 
     try:
         await bot.send_message(payment.user_id, "✅ Оплата подтверждена! Подписка активирована.")
+        sub = await session.scalar(select(Subscription).where(Subscription.user_id == payment.user_id))
+        if sub and sub.awg_config:
+            file = BufferedInputFile(sub.awg_config.encode(), filename="vpnmarsi.conf")
+            await bot.send_document(
+                payment.user_id,
+                file,
+                caption=(
+                    "Ваш конфиг AmneziaWG.\n\n"
+                    "1. Установите приложение AmneziaVPN.\n"
+                    "2. «Добавить конфигурацию» → «Импортировать из файла» → выберите этот файл.\n"
+                    "3. Подключитесь.\n\n"
+                    "⚠️ 1 подписка = 1 устройство."
+                ),
+            )
     except Exception:
         pass
 

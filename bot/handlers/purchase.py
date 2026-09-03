@@ -142,8 +142,9 @@ async def confirm_paid_by_user(callback: CallbackQuery) -> None:
 
 async def apply_paid_payment(session: AsyncSession, payment: Payment) -> None:
     """Shared by the admin confirmation handler: activates the subscription,
-    consumes the promo code and grants a referral bonus on first payment."""
-    from bot.services.referrals import grant_bonus_if_first_payment
+    consumes the promo code and grants the referrer their recurring bonus
+    (30% of this payment + 3 days — see TZ) if this user was referred."""
+    from bot.services.referrals import grant_bonus_for_payment
     from bot.services.subscriptions import activate_or_extend
 
     user = await session.get(User, payment.user_id)
@@ -156,4 +157,4 @@ async def apply_paid_payment(session: AsyncSession, payment: Payment) -> None:
         except PromoError:
             pass  # already consumed or expired between creation and confirmation; ignore
 
-    await grant_bonus_if_first_payment(session, user)
+    await grant_bonus_for_payment(session, user, payment)

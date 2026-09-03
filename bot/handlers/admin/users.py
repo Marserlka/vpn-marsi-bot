@@ -44,7 +44,7 @@ async def _render_user_card(message: Message, session: AsyncSession, user: User)
         f"👤 Пользователь {user.tg_id} (@{user.username})\n"
         f"Баланс: {user.balance} руб.\n"
         f"Подписка: {status}\n"
-        f"Ключ: {sub.subscription_url or '—'}"
+        f"AmneziaWG pubkey: {sub.awg_public_key or '—'}"
     )
     await message.answer(text, reply_markup=user_actions_keyboard(user.tg_id))
 

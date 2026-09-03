@@ -16,6 +16,7 @@ from bot.handlers.admin import build_admin_router
 from bot.middlewares.db_session import DbSessionMiddleware
 from bot.middlewares.errors import ErrorLoggingMiddleware
 from bot.scheduler.jobs import register_jobs
+from bot.services.awg_agent import awg_agent
 from bot.services.marzban import marzban_client
 from bot.utils.logging import setup_logging
 
@@ -48,6 +49,7 @@ async def main() -> None:
     finally:
         scheduler.shutdown(wait=False)
         await marzban_client.close()
+        await awg_agent.close()
         await bot.session.close()
 
 

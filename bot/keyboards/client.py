@@ -8,11 +8,31 @@ from bot.config import settings
 
 def main_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="💰 Купить / Продлить VPN", callback_data="menu:buy")
-    kb.button(text="👤 Личный кабинет", callback_data="menu:profile")
-    kb.button(text="👥 Реферальная система", callback_data="menu:referral")
-    kb.button(text="📥 Инструкция по настройке", callback_data="menu:instructions")
+    kb.button(text="🌐 Личный кабинет", callback_data="menu:profile")
+    kb.button(text="🌐 Создать подключение", callback_data="menu:buy")
+    kb.button(text="⚙️ Управление подключениями", callback_data="menu:manage")
+    kb.button(text="📥 Инструкции", callback_data="menu:instructions")
     kb.button(text="🆘 Поддержка", callback_data="menu:support")
+    kb.button(text="🎁 Бонус за друга", callback_data="menu:referral")
+    kb.button(text="⭐ Купить звёзды", url=settings.STAR_BOT_URL)
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def profile_keyboard() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⚙️ Управление подключениями", callback_data="menu:manage")
+    kb.button(text="⬅️ Главное меню", callback_data="menu:main")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def manage_keyboard(has_config: bool) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    if has_config:
+        kb.button(text="📥 Получить конфиг", callback_data="menu:get_config")
+    kb.button(text="🌐 Создать / продлить подключение", callback_data="menu:buy")
+    kb.button(text="⬅️ Главное меню", callback_data="menu:main")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -52,4 +72,10 @@ def waiting_confirmation_keyboard() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="Я оплатил(а)", callback_data="buy:confirm_paid")
     kb.adjust(1)
+    return kb.as_markup()
+
+
+def captcha_keyboard(referrer_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Я не бот", callback_data=f"start:verify:{referrer_id}")
     return kb.as_markup()

@@ -25,12 +25,25 @@ class Settings(BaseSettings):
     MARZBAN_INBOUND_TAG: str = "VLESS-Reality"
     MARZBAN_SNI_MASK: str = "vk.com"
 
+    # AmneziaWG peer-management agent (primary protocol — see TZ 3.2 for why
+    # VLESS-Reality was demoted: it proved unreliable against Russian DPI in
+    # real-world testing, while AmneziaWG held up).
+    AWG_AGENT_BASE_URL: str = ""
+    AWG_AGENT_TOKEN: str = ""
+
     PLAN_1: str = "30:30"
     PLAN_2: str = "90:90"
     PLAN_3: str = "180:180"
 
-    REFERRAL_BONUS_DAYS: int = 0
-    REFERRAL_BONUS_AMOUNT: int = 15
+    # Referral: recurring 30% of every purchase the referred user makes,
+    # plus a flat 3-day bonus, credited on EACH of their payments (not just
+    # the first). Guarded by an "I'm not a bot" captcha button in /start so
+    # ref-farming bots can't cheaply spam referral signups.
+    REFERRAL_BONUS_PERCENT: int = 30
+    REFERRAL_BONUS_DAYS: int = 3
+    REFERRAL_CAPTCHA_TIMEOUT_SECONDS: int = 120
+
+    STAR_BOT_URL: str = "https://t.me/MarsiShopBot"
 
     REMINDER_DAYS_BEFORE: str = "3,1"
 

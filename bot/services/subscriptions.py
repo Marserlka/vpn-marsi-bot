@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.config import settings
 from bot.database.models import Subscription
-from bot.services.marzban import marzban_client
+from bot.services.awg_agent import awg_agent
 
 logger = logging.getLogger("bot.subscriptions")
 
@@ -26,22 +24,30 @@ async def get_or_create_subscription(session: AsyncSession, user_id: int) -> Sub
 async def activate_or_extend(session: AsyncSession, user_id: int, period_days: int) -> Subscription:
     """Create (first purchase) or extend (renewal) the user's VPN access.
 
-    Mirrors TZ 3.1/4.2: brand-new Marzban user gets `ips_limit=1`; an existing,
-    still-active subscription is simply pushed further out; an expired one is
-    re-enabled in Marzban and its countdown restarts from now.
+    AmneziaWG is the primary protocol (see TZ 3.2): VLESS-Reality proved
+    unreliable against real-world Russian DPI, while AmneziaWG held up in
+    testing. A peer has no built-in expiry, so our own `expires_at` is the
+    source of truth — the scheduler's expire_sweep() removes the peer via
+    the awg_agent when it lapses. If the subscription is still within its
+    current period (renewal before expiry), the peer already exists and we
+    simply push `expires_at` out — no agent call needed. A lapsed
+    subscription's peer was already deleted by expire_sweep(), so
+    reactivating it means requesting a brand-new peer (new keys/IP), which
+    is fine — the bot just resends the fresh config to the user.
     """
     sub = await get_or_create_subscription(session, user_id)
     now = dt.datetime.utcnow()
 
-    if sub.marzban_username is None:
-        sub.marzban_username = f"vpnmarsi_{user_id}_{uuid.uuid4().hex[:6]}"
+    needs_new_peer = sub.awg_public_key is None or sub.status != "active"
+
+    if needs_new_peer:
+        peer = await awg_agent.create_peer(label=f"user_{user_id}")
+        sub.awg_public_key = peer["public_key"]
+        sub.awg_config = peer["client_config"]
         new_expire = now + dt.timedelta(days=period_days)
-        marzban_user = await marzban_client.create_user(sub.marzban_username, new_expire)
-        sub.subscription_url = marzban_client.subscription_url_from(marzban_user, settings.MARZBAN_BASE_URL)
     else:
-        base = sub.expires_at if (sub.expires_at and sub.expires_at > now and sub.status == "active") else now
+        base = sub.expires_at if (sub.expires_at and sub.expires_at > now) else now
         new_expire = base + dt.timedelta(days=period_days)
-        await marzban_client.modify_expire(sub.marzban_username, new_expire, status="active")
 
     sub.expires_at = new_expire
     sub.status = "active"
@@ -52,10 +58,10 @@ async def activate_or_extend(session: AsyncSession, user_id: int, period_days: i
 
 
 async def deactivate(session: AsyncSession, sub: Subscription) -> None:
-    if sub.marzban_username:
+    if sub.awg_public_key:
         try:
-            await marzban_client.disable_user(sub.marzban_username)
+            await awg_agent.delete_peer(sub.awg_public_key)
         except Exception:
-            logger.exception("Failed to disable Marzban user %s", sub.marzban_username)
+            logger.exception("Failed to delete AmneziaWG peer for subscription %s", sub.id)
     sub.status = "expired"
     await session.flush()

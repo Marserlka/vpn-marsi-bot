@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
@@ -17,26 +16,15 @@ async def register_referral(session: AsyncSession, user: User, referrer_id: int)
     await session.flush()
 
 
-async def grant_bonus_if_first_payment(session: AsyncSession, user: User) -> None:
-    """Called right after a payment is marked paid. Grants the referrer a bonus
-    only on the referred user's very first successful payment (TZ 4.1)."""
+async def grant_bonus_for_payment(session: AsyncSession, user: User, payment: Payment) -> None:
+    """Called after every payment is marked paid (not just the first one):
+    the referrer earns REFERRAL_BONUS_PERCENT% of that payment's amount plus
+    a flat REFERRAL_BONUS_DAYS-day top-up, each time their referral pays."""
     if user.referrer_id is None:
         return
 
-    prior_paid = await session.execute(
-        select(Payment.id).where(Payment.user_id == user.tg_id, Payment.status == "paid")
-    )
-    if len(prior_paid.all()) != 1:
-        return  # not the first payment
-
-    already_granted = await session.scalar(
-        select(ReferralBonus).where(ReferralBonus.referred_id == user.tg_id)
-    )
-    if already_granted:
-        return
-
+    bonus_amount = payment.amount * settings.REFERRAL_BONUS_PERCENT // 100
     bonus_days = settings.REFERRAL_BONUS_DAYS
-    bonus_amount = settings.REFERRAL_BONUS_AMOUNT
 
     session.add(
         ReferralBonus(
@@ -47,16 +35,24 @@ async def grant_bonus_if_first_payment(session: AsyncSession, user: User) -> Non
         )
     )
 
+    referrer = await session.get(User, user.referrer_id)
+    if referrer is None:
+        await session.flush()
+        return
+
     if bonus_amount:
-        referrer = await session.get(User, user.referrer_id)
-        if referrer:
-            referrer.balance += bonus_amount
-            session.add(
-                BalanceTransaction(
-                    user_id=referrer.tg_id,
-                    delta=bonus_amount,
-                    reason="referral",
-                )
+        referrer.balance += bonus_amount
+        session.add(
+            BalanceTransaction(
+                user_id=referrer.tg_id,
+                delta=bonus_amount,
+                reason="referral",
             )
+        )
+
+    if bonus_days:
+        from bot.services.subscriptions import activate_or_extend
+
+        await activate_or_extend(session, referrer.tg_id, bonus_days)
 
     await session.flush()

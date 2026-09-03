@@ -49,6 +49,7 @@ class Payment(Base):
     period_days: Mapped[int] = mapped_column(Integer)
     provider: Mapped[str] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending/paid/failed
+    purpose: Mapped[str] = mapped_column(String(16), default="subscription")  # subscription/balance_topup
     promo_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
     invoice_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
@@ -87,6 +88,19 @@ class ReferralBonus(Base):
     bonus_days: Mapped[int] = mapped_column(Integer, default=0)
     bonus_amount: Mapped[int] = mapped_column(Integer, default=0)
     granted_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class BotSettings(Base):
+    """Singleton row (id=1) of runtime settings the admin can change from
+    inside the bot itself, without a redeploy — currently just the
+    mandatory-channel-subscription gate."""
+
+    __tablename__ = "bot_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    force_sub_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    force_sub_channel_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    force_sub_channel_url: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
 
 class BalanceTransaction(Base):

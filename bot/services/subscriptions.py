@@ -25,8 +25,8 @@ async def activate_or_extend(session: AsyncSession, user_id: int, period_days: i
     """Create (first purchase) or extend (renewal) the user's VPN access.
 
     AmneziaWG is the primary protocol (see TZ 3.2): VLESS-Reality proved
-    unreliable against real-world Russian DPI, while AmneziaWG held up in
-    testing. A peer has no built-in expiry, so our own `expires_at` is the
+    less stable in real-world testing, while AmneziaWG held up. A peer has
+    no built-in expiry, so our own `expires_at` is the
     source of truth — the scheduler's expire_sweep() removes the peer via
     the awg_agent when it lapses. If the subscription is still within its
     current period (renewal before expiry), the peer already exists and we

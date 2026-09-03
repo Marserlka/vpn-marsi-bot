@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import datetime as dt
 
-from aiogram import Router, F
+from aiogram import Router, F, Bot
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart, CommandObject
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,7 @@ from bot.config import settings
 from bot.database.models import User
 from bot.keyboards.client import captcha_keyboard, main_menu
 from bot.services.referrals import register_referral
+from bot.services.settings import get_settings
 
 router = Router(name="start")
 
@@ -65,3 +67,25 @@ async def verify_captcha(callback: CallbackQuery, session: AsyncSession) -> None
 
     await callback.message.edit_text(WELCOME_TEXT, reply_markup=main_menu())
     await callback.answer("Спасибо!")
+
+
+@router.callback_query(F.data == "force_sub:check")
+async def check_force_sub(callback: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
+    row = await get_settings(session)
+    if not row.force_sub_enabled or not row.force_sub_channel_id:
+        await callback.message.answer(WELCOME_TEXT, reply_markup=main_menu())
+        await callback.answer()
+        return
+
+    try:
+        member = await bot.get_chat_member(row.force_sub_channel_id, callback.from_user.id)
+        is_subscribed = member.status not in ("left", "kicked")
+    except TelegramBadRequest:
+        is_subscribed = True
+
+    if not is_subscribed:
+        await callback.answer("Не вижу вашей подписки. Подпишитесь и попробуйте снова.", show_alert=True)
+        return
+
+    await callback.message.answer(WELCOME_TEXT, reply_markup=main_menu())
+    await callback.answer("Спасибо! Доступ открыт.")

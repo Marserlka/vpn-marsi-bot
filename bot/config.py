@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     MARZBAN_SNI_MASK: str = "vk.com"
 
     # AmneziaWG peer-management agent (primary protocol — see TZ 3.2 for why
-    # VLESS-Reality was demoted: it proved unreliable against Russian DPI in
-    # real-world testing, while AmneziaWG held up).
+    # VLESS-Reality was demoted: it proved less stable in real-world testing,
+    # while AmneziaWG held up).
     AWG_AGENT_BASE_URL: str = ""
     AWG_AGENT_TOKEN: str = ""
 
@@ -43,7 +43,12 @@ class Settings(BaseSettings):
     REFERRAL_BONUS_DAYS: int = 3
     REFERRAL_CAPTCHA_TIMEOUT_SECONDS: int = 120
 
-    STAR_BOT_URL: str = "https://t.me/MarsiShopBot"
+    SUPPORT_USERNAME: str = "Marserlka"
+
+    # Legal documents shown before purchase (required for payment-provider
+    # compliance — see TZ). Update these if the docs are republished elsewhere.
+    PRIVACY_POLICY_URL: str = "https://telegra.ph/Politika-konfidencialnosti-09-03-91"
+    TERMS_URL: str = "https://telegra.ph/Polzovatelskoe-soglashenie-09-03-40"
 
     REMINDER_DAYS_BEFORE: str = "3,1"
 

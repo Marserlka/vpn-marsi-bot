@@ -3,6 +3,7 @@ from __future__ import annotations
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 
+from bot.config import settings
 from bot.handlers.start import WELCOME_TEXT
 from bot.keyboards.client import back_to_menu, main_menu
 
@@ -32,7 +33,7 @@ async def instructions(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:support")
 async def support(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
-        "🆘 Поддержка: напишите администратору — @your_support_username",
+        f"🆘 Поддержка: напишите администратору — @{settings.SUPPORT_USERNAME}",
         reply_markup=back_to_menu(),
     )
     await callback.answer()

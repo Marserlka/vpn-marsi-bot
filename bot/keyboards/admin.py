@@ -10,6 +10,19 @@ def admin_main_menu() -> InlineKeyboardMarkup:
     kb.button(text="👤 Управление пользователями", callback_data="admin:users")
     kb.button(text="🎟 Промокоды", callback_data="admin:promo")
     kb.button(text="📢 Рассылка", callback_data="admin:broadcast")
+    kb.button(text="🔒 Обязательная подписка", callback_data="admin:force_sub")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def force_sub_keyboard(enabled: bool) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    if enabled:
+        kb.button(text="🔴 Отключить", callback_data="admin:force_sub:disable")
+    else:
+        kb.button(text="🟢 Включить", callback_data="admin:force_sub:enable")
+    kb.button(text="✏️ Задать канал", callback_data="admin:force_sub:set")
+    kb.button(text="⬅️ Админ-меню", callback_data="admin:main")
     kb.adjust(1)
     return kb.as_markup()
 

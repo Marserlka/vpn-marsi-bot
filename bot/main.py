@@ -11,10 +11,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot.config import settings
 from bot.database.db import init_db
-from bot.handlers import menu, profile, purchase, start
+from bot.handlers import balance, menu, profile, purchase, start
 from bot.handlers.admin import build_admin_router
 from bot.middlewares.db_session import DbSessionMiddleware
 from bot.middlewares.errors import ErrorLoggingMiddleware
+from bot.middlewares.force_subscribe import ForceSubscribeMiddleware
 from bot.scheduler.jobs import register_jobs
 from bot.services.awg_agent import awg_agent
 from bot.services.marzban import marzban_client
@@ -32,10 +33,12 @@ async def main() -> None:
 
     dp.update.middleware(ErrorLoggingMiddleware())
     dp.update.middleware(DbSessionMiddleware())
+    dp.update.middleware(ForceSubscribeMiddleware())
 
     dp.include_router(start.router)
     dp.include_router(menu.router)
     dp.include_router(profile.router)
+    dp.include_router(balance.router)
     dp.include_router(purchase.router)
     dp.include_router(build_admin_router())
 

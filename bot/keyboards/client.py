@@ -9,18 +9,18 @@ from bot.config import settings
 def main_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="🌐 Личный кабинет", callback_data="menu:profile")
-    kb.button(text="🌐 Создать подключение", callback_data="menu:buy")
     kb.button(text="⚙️ Управление подключениями", callback_data="menu:manage")
+    kb.button(text="💰 Баланс", callback_data="menu:balance")
     kb.button(text="📥 Инструкции", callback_data="menu:instructions")
     kb.button(text="🆘 Поддержка", callback_data="menu:support")
     kb.button(text="🎁 Бонус за друга", callback_data="menu:referral")
-    kb.button(text="⭐ Купить звёзды", url=settings.STAR_BOT_URL)
     kb.adjust(1)
     return kb.as_markup()
 
 
 def profile_keyboard() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    kb.button(text="🌐 Создать подключение", callback_data="menu:buy")
     kb.button(text="⚙️ Управление подключениями", callback_data="menu:manage")
     kb.button(text="⬅️ Главное меню", callback_data="menu:main")
     kb.adjust(1)
@@ -37,6 +37,14 @@ def manage_keyboard(has_config: bool) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def balance_keyboard() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Пополнить", callback_data="balance:topup")
+    kb.button(text="⬅️ Главное меню", callback_data="menu:main")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 def back_to_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="⬅️ Главное меню", callback_data="menu:main")
@@ -47,7 +55,17 @@ def plans_keyboard() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for idx, plan in enumerate(settings.plans):
         kb.button(text=f"{plan.period_days} дн. — {plan.price_rub} руб.", callback_data=f"buy:plan:{idx}")
-    kb.button(text="⬅️ Главное меню", callback_data="menu:main")
+    kb.button(text="📄 Политика / Условия", callback_data="buy:legal")
+    kb.button(text="⬅️ Назад", callback_data="menu:main")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def legal_docs_keyboard() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔒 Политика конфиденциальности", url=settings.PRIVACY_POLICY_URL)
+    kb.button(text="📄 Условия использования", url=settings.TERMS_URL)
+    kb.button(text="⬅️ Назад", callback_data="menu:buy")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -60,8 +78,10 @@ def promo_prompt_keyboard() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def payment_methods_keyboard() -> InlineKeyboardMarkup:
+def payment_methods_keyboard(can_pay_from_balance: bool) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    if can_pay_from_balance:
+        kb.button(text="💰 Оплатить с баланса", callback_data="buy:pay:balance")
     kb.button(text="✅ Оплатить (тестовый режим)", callback_data="buy:pay:manual")
     kb.button(text="⬅️ Отмена", callback_data="menu:main")
     kb.adjust(1)

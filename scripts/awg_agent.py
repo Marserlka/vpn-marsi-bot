@@ -96,7 +96,7 @@ PROTOCOLS = {
         "bin": os.environ.get("WG_BIN", "/usr/bin/wg"),
         "endpoint": os.environ["WG_SERVER_ENDPOINT"],
         "server_public_key": os.environ["WG_SERVER_PUBLIC_KEY"],
-        "client_params": "",
+        "client_params": "MTU = 1280\n",
     },
 }
 

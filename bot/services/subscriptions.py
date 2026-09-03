@@ -8,8 +8,39 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import Subscription
 from bot.services.awg_agent import awg_agent
+from bot.services.marzban import marzban_client
 
 logger = logging.getLogger("bot.subscriptions")
+
+WG_FAMILY = {"amnezia", "wireguard"}
+MARZBAN_FAMILY = {"vless", "ss"}
+
+
+async def _provision(user_id: int, protocol: str, expire_at: dt.datetime) -> tuple[str, str]:
+    """Create a peer/user for `protocol` and return (identity, client_config).
+
+    `identity` is what `_deprovision` needs later to remove it again — an
+    AmneziaWG/WireGuard public key for the WG family, a Marzban username for
+    the VLESS/Shadowsocks family.
+    """
+    label = f"user_{user_id}"
+    if protocol in WG_FAMILY:
+        peer = await awg_agent.create_peer(label=label, protocol=protocol)
+        return peer["public_key"], peer["client_config"]
+    if protocol in MARZBAN_FAMILY:
+        user = await marzban_client.create_user(label, expire_at, protocol=protocol)
+        return label, user["links"][0]
+    raise ValueError(f"unknown protocol: {protocol}")
+
+
+async def _deprovision(identity: str, protocol: str) -> None:
+    try:
+        if protocol in WG_FAMILY:
+            await awg_agent.delete_peer(identity, protocol=protocol)
+        elif protocol in MARZBAN_FAMILY:
+            await marzban_client.remove_user(identity)
+    except Exception:
+        logger.exception("Failed to remove %s peer/user %s", protocol, identity)
 
 
 async def get_or_create_subscription(session: AsyncSession, user_id: int) -> Subscription:
@@ -26,19 +57,17 @@ async def activate_or_extend(
 ) -> Subscription:
     """Create (first purchase) or extend (renewal) the user's VPN access.
 
-    AmneziaWG is the default protocol (see TZ 3.2): VLESS-Reality proved
-    less stable in real-world testing, while AmneziaWG held up. Plain
-    WireGuard is offered as a faster, non-obfuscated alternative (TZ 3.3) —
-    `protocol` picks which one a freshly-created peer uses; existing peers
-    keep their protocol unless the caller passes a new one. A peer has no
-    built-in expiry, so our own `expires_at` is the source of truth — the
-    scheduler's expire_sweep() removes the peer via the awg_agent when it
-    lapses. If the subscription is still within its current period
-    (renewal before expiry) and the protocol isn't changing, the peer
-    already exists and we simply push `expires_at` out — no agent call
-    needed. A lapsed subscription's peer was already deleted by
-    expire_sweep(), so reactivating it means requesting a brand-new peer
-    (new keys/IP), which is fine — the bot just resends the fresh config.
+    Four protocols are available (see TZ 3.2-3.4): AmneziaWG (default,
+    obfuscated), plain WireGuard (faster, no obfuscation), and VLESS-Reality
+    / Shadowsocks via Marzban. `protocol` picks which one a freshly-created
+    peer uses; existing peers keep their protocol unless the caller passes a
+    new one. A peer has no built-in expiry, so our own `expires_at` is the
+    source of truth — the scheduler's expire_sweep() removes it when it
+    lapses. If the subscription is still within its current period (renewal
+    before expiry) and the protocol isn't changing, the peer already exists
+    and we simply push `expires_at` out. A lapsed subscription's peer was
+    already deleted by expire_sweep(), so reactivating it means requesting a
+    brand-new one — the bot just resends the fresh config.
     """
     sub = await get_or_create_subscription(session, user_id)
     now = dt.datetime.utcnow()
@@ -50,18 +79,17 @@ async def activate_or_extend(
 
     if needs_new_peer:
         if sub.awg_public_key and sub.status == "active":
-            try:
-                await awg_agent.delete_peer(sub.awg_public_key, protocol=sub.protocol)
-            except Exception:
-                logger.exception("Failed to delete old peer for subscription %s", sub.id)
-        peer = await awg_agent.create_peer(label=f"user_{user_id}", protocol=target_protocol)
-        sub.awg_public_key = peer["public_key"]
-        sub.awg_config = peer["client_config"]
-        sub.protocol = target_protocol
+            await _deprovision(sub.awg_public_key, sub.protocol)
         new_expire = now + dt.timedelta(days=period_days)
+        identity, config = await _provision(user_id, target_protocol, new_expire)
+        sub.awg_public_key = identity
+        sub.awg_config = config
+        sub.protocol = target_protocol
     else:
         base = sub.expires_at if (sub.expires_at and sub.expires_at > now) else now
         new_expire = base + dt.timedelta(days=period_days)
+        if sub.protocol in MARZBAN_FAMILY:
+            await marzban_client.modify_expire(sub.awg_public_key, new_expire)
 
     sub.expires_at = new_expire
     sub.status = "active"
@@ -72,9 +100,9 @@ async def activate_or_extend(
 
 
 async def switch_protocol(session: AsyncSession, user_id: int, new_protocol: str) -> Subscription:
-    """Move an active subscription's peer to the other protocol, keeping
+    """Move an active subscription's peer to a different protocol, keeping
     `expires_at` untouched — unlike activate_or_extend, this isn't a
-    purchase, just a client-side preference (see TZ 3.3)."""
+    purchase, just a client-side preference (see TZ 3.3-3.4)."""
     sub = await get_or_create_subscription(session, user_id)
     if sub.status != "active":
         raise ValueError("subscription is not active")
@@ -82,14 +110,11 @@ async def switch_protocol(session: AsyncSession, user_id: int, new_protocol: str
         return sub
 
     if sub.awg_public_key:
-        try:
-            await awg_agent.delete_peer(sub.awg_public_key, protocol=sub.protocol)
-        except Exception:
-            logger.exception("Failed to delete old peer for subscription %s", sub.id)
+        await _deprovision(sub.awg_public_key, sub.protocol)
 
-    peer = await awg_agent.create_peer(label=f"user_{user_id}", protocol=new_protocol)
-    sub.awg_public_key = peer["public_key"]
-    sub.awg_config = peer["client_config"]
+    identity, config = await _provision(user_id, new_protocol, sub.expires_at)
+    sub.awg_public_key = identity
+    sub.awg_config = config
     sub.protocol = new_protocol
     await session.flush()
     return sub
@@ -97,9 +122,6 @@ async def switch_protocol(session: AsyncSession, user_id: int, new_protocol: str
 
 async def deactivate(session: AsyncSession, sub: Subscription) -> None:
     if sub.awg_public_key:
-        try:
-            await awg_agent.delete_peer(sub.awg_public_key, protocol=sub.protocol)
-        except Exception:
-            logger.exception("Failed to delete AmneziaWG peer for subscription %s", sub.id)
+        await _deprovision(sub.awg_public_key, sub.protocol)
     sub.status = "expired"
     await session.flush()

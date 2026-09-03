@@ -12,10 +12,23 @@ from bot.services.subscriptions import get_or_create_subscription, switch_protoc
 
 router = Router(name="profile")
 
-PROTOCOL_LABELS = {"amnezia": "AmneziaWG (маскировка)", "wireguard": "WireGuard (скорость)"}
+PROTOCOL_LABELS = {
+    "amnezia": "AmneziaWG (маскировка)",
+    "wireguard": "WireGuard (скорость)",
+    "vless": "VLESS-Reality",
+    "ss": "Shadowsocks",
+}
 PROTOCOL_APP = {
     "amnezia": "приложение AmneziaVPN",
     "wireguard": "официальное приложение WireGuard",
+    "vless": "приложение v2rayNG / Happ / Streisand (поддерживающее VLESS)",
+    "ss": "приложение Shadowsocks (Outline, NekoBox и т.п.)",
+}
+PROTOCOL_IMPORT_HINT = {
+    "amnezia": "«Добавить конфигурацию» → «Импортировать из файла» → выберите этот файл",
+    "wireguard": "«Добавить конфигурацию» → «Импортировать из файла» → выберите этот файл",
+    "vless": "скопируйте ссылку из файла и добавьте её в приложении («Добавить профиль по ссылке»)",
+    "ss": "скопируйте ссылку из файла и добавьте её в приложении («Добавить профиль по ссылке»)",
 }
 
 
@@ -40,19 +53,26 @@ async def profile(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer()
 
 
-@router.callback_query(F.data == "menu:manage")
-async def manage(callback: CallbackQuery, session: AsyncSession) -> None:
-    sub = await get_or_create_subscription(session, callback.from_user.id)
-
-    text = (
+def _manage_text(sub: Subscription) -> str:
+    limit_note = (
+        "⚠️ 1 подписка предназначена только для 1 устройства. При одновременном "
+        "включении на двух устройствах доступ автоматически блокируется."
+        if sub.protocol in ("amnezia", "wireguard")
+        else "ℹ️ Для этого протокола ограничение на 1 устройство сейчас не действует."
+    )
+    return (
         f"⚙️ Управление подключениями\n\n"
         f"{_status_line(sub)}\n"
         f"Протокол: {PROTOCOL_LABELS.get(sub.protocol, sub.protocol)}\n\n"
-        f"⚠️ 1 подписка предназначена только для 1 устройства. При одновременном "
-        f"включении на двух устройствах доступ автоматически блокируется."
+        f"{limit_note}"
     )
+
+
+@router.callback_query(F.data == "menu:manage")
+async def manage(callback: CallbackQuery, session: AsyncSession) -> None:
+    sub = await get_or_create_subscription(session, callback.from_user.id)
     await callback.message.edit_text(
-        text,
+        _manage_text(sub),
         reply_markup=manage_keyboard(
             has_config=bool(sub.awg_config), is_active=sub.status == "active", protocol=sub.protocol
         ),
@@ -68,15 +88,21 @@ async def get_config(callback: CallbackQuery, session: AsyncSession) -> None:
         return
 
     app_name = PROTOCOL_APP.get(sub.protocol, "приложение AmneziaVPN")
+    import_hint = PROTOCOL_IMPORT_HINT.get(sub.protocol, PROTOCOL_IMPORT_HINT["amnezia"])
+    limit_note = (
+        "⚠️ 1 подписка = 1 устройство."
+        if sub.protocol in ("amnezia", "wireguard")
+        else "ℹ️ Ограничение на 1 устройство для этого протокола пока не действует."
+    )
     file = BufferedInputFile(sub.awg_config.encode(), filename="vpnmarsi.conf")
     await callback.message.answer_document(
         file,
         caption=(
             f"Ваш конфиг ({PROTOCOL_LABELS.get(sub.protocol, sub.protocol)}).\n\n"
             f"1. Установите {app_name}.\n"
-            "2. «Добавить конфигурацию» → «Импортировать из файла» → выберите этот файл.\n"
+            f"2. {import_hint}.\n"
             "3. Подключитесь.\n\n"
-            "⚠️ 1 подписка = 1 устройство."
+            f"{limit_note}"
         ),
     )
     await callback.answer()
@@ -95,15 +121,8 @@ async def switch_protocol_handler(callback: CallbackQuery, session: AsyncSession
         raise
 
     await callback.answer(f"Протокол изменён на {PROTOCOL_LABELS.get(new_protocol, new_protocol)}", show_alert=True)
-    text = (
-        f"⚙️ Управление подключениями\n\n"
-        f"{_status_line(sub)}\n"
-        f"Протокол: {PROTOCOL_LABELS.get(sub.protocol, sub.protocol)}\n\n"
-        f"⚠️ 1 подписка предназначена только для 1 устройства. При одновременном "
-        f"включении на двух устройствах доступ автоматически блокируется."
-    )
     await callback.message.edit_text(
-        text,
+        _manage_text(sub),
         reply_markup=manage_keyboard(
             has_config=bool(sub.awg_config), is_active=sub.status == "active", protocol=sub.protocol
         ),

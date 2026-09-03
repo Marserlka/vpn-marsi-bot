@@ -23,11 +23,12 @@ class Settings(BaseSettings):
     MARZBAN_ADMIN_USERNAME: str = ""
     MARZBAN_ADMIN_PASSWORD: str = ""
     MARZBAN_INBOUND_TAG: str = "VLESS-Reality"
-    MARZBAN_SNI_MASK: str = "vk.com"
+    MARZBAN_SS_INBOUND_TAG: str = "Shadowsocks-TCP"
+    MARZBAN_SNI_MASK: str = "addons.mozilla.org"
 
-    # AmneziaWG peer-management agent (primary protocol — see TZ 3.2 for why
-    # VLESS-Reality was demoted: it proved less stable in real-world testing,
-    # while AmneziaWG held up).
+    # AmneziaWG peer-management agent (default protocol — see TZ 3.2 for why
+    # VLESS-Reality was originally demoted, and TZ 3.4 for why it's back as
+    # an alternative alongside Shadowsocks, both via Marzban/Xray).
     AWG_AGENT_BASE_URL: str = ""
     AWG_AGENT_TOKEN: str = ""
 

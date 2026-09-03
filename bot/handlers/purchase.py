@@ -208,12 +208,18 @@ async def deliver_config(bot: Bot, session: AsyncSession, user_id: int) -> None:
     """Sends the user's current VPN .conf as a document, if they have one."""
     from sqlalchemy import select
 
-    from bot.handlers.profile import PROTOCOL_APP, PROTOCOL_LABELS
+    from bot.handlers.profile import PROTOCOL_APP, PROTOCOL_IMPORT_HINT, PROTOCOL_LABELS
 
     sub = await session.scalar(select(Subscription).where(Subscription.user_id == user_id))
     if not sub or not sub.awg_config:
         return
     app_name = PROTOCOL_APP.get(sub.protocol, "приложение AmneziaVPN")
+    import_hint = PROTOCOL_IMPORT_HINT.get(sub.protocol, PROTOCOL_IMPORT_HINT["amnezia"])
+    limit_note = (
+        "⚠️ 1 подписка = 1 устройство."
+        if sub.protocol in ("amnezia", "wireguard")
+        else "ℹ️ Ограничение на 1 устройство для этого протокола пока не действует."
+    )
     file = BufferedInputFile(sub.awg_config.encode(), filename="vpnmarsi.conf")
     await bot.send_document(
         user_id,
@@ -221,9 +227,9 @@ async def deliver_config(bot: Bot, session: AsyncSession, user_id: int) -> None:
         caption=(
             f"Ваш конфиг ({PROTOCOL_LABELS.get(sub.protocol, sub.protocol)}).\n\n"
             f"1. Установите {app_name}.\n"
-            "2. «Добавить конфигурацию» → «Импортировать из файла» → выберите этот файл.\n"
+            f"2. {import_hint}.\n"
             "3. Подключитесь.\n\n"
-            "⚠️ 1 подписка = 1 устройство."
+            f"{limit_note}"
         ),
     )
 

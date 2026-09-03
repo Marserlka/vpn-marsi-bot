@@ -18,15 +18,15 @@ class MarzbanError(Exception):
 class MarzbanClient:
     """Thin async wrapper around the Marzban REST API.
 
-    NOTE (verify against the deployed panel before going live): the exact field
-    used to cap simultaneous connections per user differs between Marzban
-    versions/forks (seen as `ips_limit` or `limit_ip` in various docs). Check
-    the live panel's Swagger UI at ``{MARZBAN_BASE_URL}/docs`` and update
-    ``IP_LIMIT_FIELD`` below to match before relying on the 1-device limit.
+    KNOWN GAP: checked the deployed panel's UserCreate schema (03.09.2026,
+    Marzban `gozargah/marzban:latest`) — it has no per-user IP/device-count
+    field at all (no `ips_limit`, no `limit_ip`). Unlike AmneziaWG/WireGuard,
+    where the 1-device rule falls out of the protocol itself (see TZ 3.1),
+    VLESS/Shadowsocks users created here are NOT limited to one device by
+    Marzban. If this needs enforcing, it'll have to be a separate mechanism
+    (e.g. parsing Xray's access log for concurrent client IPs) — out of
+    scope for the initial VLESS/SS rollout.
     """
-
-    IP_LIMIT_FIELD = "ips_limit"
-    IP_LIMIT_VALUE = 1
 
     def __init__(self) -> None:
         self._base_url = settings.MARZBAN_BASE_URL.rstrip("/")
@@ -69,14 +69,21 @@ class MarzbanClient:
         resp.raise_for_status()
         return resp
 
-    async def create_user(self, username: str, expire_at: dt.datetime) -> dict:
+    async def create_user(self, username: str, expire_at: dt.datetime, protocol: str = "vless") -> dict:
+        """protocol is "vless" (Reality over xhttp — no vision flow, that's a
+        TCP-transport-only optimization) or "ss" (Shadowsocks)."""
+        if protocol == "ss":
+            proxies = {"shadowsocks": {"method": "chacha20-ietf-poly1305"}}
+            inbounds = {"shadowsocks": [settings.MARZBAN_SS_INBOUND_TAG]}
+        else:
+            proxies = {"vless": {}}
+            inbounds = {"vless": [settings.MARZBAN_INBOUND_TAG]}
         payload = {
             "username": username,
-            "proxies": {"vless": {"flow": "xtls-rprx-vision"}},
-            "inbounds": {"vless": [settings.MARZBAN_INBOUND_TAG]},
+            "proxies": proxies,
+            "inbounds": inbounds,
             "expire": int(expire_at.timestamp()),
-            "data_limit": 0,  # unlimited traffic; device limit is enforced via IP field below
-            self.IP_LIMIT_FIELD: self.IP_LIMIT_VALUE,
+            "data_limit": 0,  # unlimited traffic — see class docstring re: no per-device limit here
             "status": "active",
         }
         resp = await self._request("POST", "/api/user", json=payload)

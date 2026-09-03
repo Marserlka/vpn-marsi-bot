@@ -63,12 +63,13 @@ TOKEN = os.environ["AWG_AGENT_TOKEN"]
 CERT_FILE = os.environ["AWG_TLS_CERTFILE"]
 KEY_FILE = os.environ["AWG_TLS_KEYFILE"]
 
-# Must mirror the [Interface] block in awg0.conf exactly. Note: S3/S4 and
-# H1-H4-as-a-range are a newer AmneziaWG protocol addition that some client
-# app builds don't understand yet — one such client rejected S3 outright
-# ("Неверный ключ для секции [Interface]: s3") even though our server-side
-# tools support it. Stick to the widely-supported subset: MTU, PresharedKey
-# (set per-peer below), Jc/Jmin/Jmax/S1/S2, and single-value H1-H4.
+# Must mirror the [Interface] block in awg0.conf exactly. Confirmed by
+# direct reproduction (03.09.2026): the client app in actual use here
+# rejects S3 on import ("Неверный ключ для секции [Interface]: s3") even
+# in an otherwise byte-correct file — this isn't a formatting artifact,
+# the app genuinely doesn't parse S3/S4/I1-I3. Stick to the subset it
+# accepts: MTU, PresharedKey (set per-peer below), Jc/Jmin/Jmax/S1/S2, and
+# single-value H1-H4.
 AMNEZIA_CLIENT_PARAMS = (
     "MTU = 1280\n"
     "Jc = 9\nJmin = 30\nJmax = 90\nS1 = 110\nS2 = 120\n"

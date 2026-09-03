@@ -7,9 +7,9 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import BalanceTransaction, User
+from bot.database.models import BalanceTransaction, Connection, User
 from bot.keyboards.admin import back_to_admin, user_actions_keyboard
-from bot.services.subscriptions import activate_or_extend, deactivate, get_or_create_subscription
+from bot.services.subscriptions import deactivate, extend_connection, list_connections
 
 router = Router(name="admin_users")
 
@@ -38,15 +38,19 @@ async def _find_user(session: AsyncSession, query: str) -> User | None:
 
 
 async def _render_user_card(message: Message, session: AsyncSession, user: User) -> None:
-    sub = await get_or_create_subscription(session, user.tg_id)
-    status = f"активна до {sub.expires_at.strftime('%d.%m.%Y')}" if sub.status == "active" and sub.expires_at else "неактивна"
-    text = (
-        f"👤 Пользователь {user.tg_id} (@{user.username})\n"
-        f"Баланс: {user.balance} руб.\n"
-        f"Подписка: {status}\n"
-        f"AmneziaWG pubkey: {sub.awg_public_key or '—'}"
-    )
-    await message.answer(text, reply_markup=user_actions_keyboard(user.tg_id))
+    conns = await list_connections(session, user.tg_id)
+    lines = [
+        f"👤 Пользователь {user.tg_id} (@{user.username})",
+        f"Баланс: {user.balance} руб.",
+        f"Подключений: {len(conns)}",
+        "",
+    ]
+    for conn in conns:
+        status = f"активно до {conn.expires_at.strftime('%d.%m.%Y')}" if conn.status == "active" and conn.expires_at else "неактивно"
+        lines.append(f"• «{conn.name}» ({conn.protocol}) — {status}, id={conn.awg_public_key or '—'}")
+    if not conns:
+        lines.append("(нет подключений)")
+    await message.answer("\n".join(lines), reply_markup=user_actions_keyboard(user.tg_id, conns))
 
 
 @router.message(AdminStates.searching_user)
@@ -60,31 +64,37 @@ async def do_search(message: Message, state: FSMContext, session: AsyncSession) 
 
 
 @router.callback_query(F.data.startswith("admin:extend:"))
-async def extend_user(callback: CallbackQuery, session: AsyncSession) -> None:
-    _, _, user_id_str, days_str = callback.data.split(":")
-    user_id = int(user_id_str)
+async def extend_conn(callback: CallbackQuery, session: AsyncSession) -> None:
+    _, _, conn_id_str, days_str = callback.data.split(":")
+    conn = await session.get(Connection, int(conn_id_str))
+    if conn is None:
+        await callback.answer("Подключение не найдено", show_alert=True)
+        return
     try:
-        await activate_or_extend(session, user_id, int(days_str))
+        await extend_connection(session, conn, int(days_str))
     except Exception as exc:
         await callback.answer(f"Ошибка: {exc}", show_alert=True)
         raise
-    await callback.answer("Подписка продлена", show_alert=True)
-    user = await session.get(User, user_id)
+    await callback.answer("Продлено", show_alert=True)
+    user = await session.get(User, conn.user_id)
     if user:
         await _render_user_card(callback.message, session, user)
 
 
 @router.callback_query(F.data.startswith("admin:disable:"))
-async def disable_user(callback: CallbackQuery, session: AsyncSession) -> None:
-    user_id = int(callback.data.split(":")[-1])
-    sub = await get_or_create_subscription(session, user_id)
+async def disable_conn(callback: CallbackQuery, session: AsyncSession) -> None:
+    conn_id = int(callback.data.split(":")[-1])
+    conn = await session.get(Connection, conn_id)
+    if conn is None:
+        await callback.answer("Подключение не найдено", show_alert=True)
+        return
     try:
-        await deactivate(session, sub)
+        await deactivate(session, conn)
     except Exception as exc:
         await callback.answer(f"Ошибка: {exc}", show_alert=True)
         raise
-    await callback.answer("Подписка отключена", show_alert=True)
-    user = await session.get(User, user_id)
+    await callback.answer("Отключено", show_alert=True)
+    user = await session.get(User, conn.user_id)
     if user:
         await _render_user_card(callback.message, session, user)
 

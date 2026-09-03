@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import Payment, PromoActivation, Subscription, User
+from bot.database.models import Connection, Payment, PromoActivation, User
 from bot.keyboards.admin import admin_main_menu, back_to_admin
 
 router = Router(name="admin_stats")
@@ -28,8 +28,8 @@ async def admin_main(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "admin:stats")
 async def admin_stats(callback: CallbackQuery, session: AsyncSession) -> None:
     total_users = await session.scalar(select(func.count()).select_from(User))
-    active_subs = await session.scalar(
-        select(func.count()).select_from(Subscription).where(Subscription.status == "active")
+    active_conns = await session.scalar(
+        select(func.count()).select_from(Connection).where(Connection.status == "active")
     )
 
     today = dt.datetime.utcnow().date()
@@ -50,7 +50,7 @@ async def admin_stats(callback: CallbackQuery, session: AsyncSession) -> None:
     text = (
         "📊 Статистика\n\n"
         f"Всего пользователей: {total_users}\n"
-        f"Активных подписок: {active_subs}\n"
+        f"Активных подключений: {active_conns}\n"
         f"Оборот сегодня: {turnover_today} руб.\n"
         f"Оборот за месяц: {turnover_month} руб.\n"
         f"Использовано промокодов: {promo_used}"

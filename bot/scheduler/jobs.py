@@ -8,35 +8,35 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select
 
 from bot.database.db import async_session_maker
-from bot.database.models import Subscription
+from bot.database.models import Connection
 from bot.services.subscriptions import deactivate
 
 logger = logging.getLogger("bot.scheduler")
 
 REMINDER_TEXT = {
-    3: "Ваша VPN-подписка истекает через 3 дня. Рекомендуем продлить её заранее, чтобы не остаться без связи!",
-    1: "Внимание! Ваша подписка истекает завтра. Нажмите «Продлить», чтобы сохранить доступ к сети.",
+    3: 'Подключение «{name}» истекает через 3 дня. Продлите его заранее, чтобы не остаться без связи!',
+    1: 'Внимание! Подключение «{name}» истекает завтра. Нажмите «Продлить», чтобы сохранить доступ.',
 }
 
 
 async def send_reminders(bot: Bot) -> None:
     async with async_session_maker() as session:
         now = dt.datetime.utcnow()
-        subs = (
-            await session.execute(select(Subscription).where(Subscription.status == "active"))
+        conns = (
+            await session.execute(select(Connection).where(Connection.status == "active"))
         ).scalars().all()
 
-        for sub in subs:
-            if not sub.expires_at:
+        for conn in conns:
+            if not conn.expires_at:
                 continue
-            days_left = (sub.expires_at.date() - now.date()).days
+            days_left = (conn.expires_at.date() - now.date()).days
 
-            if days_left == 3 and not sub.reminder_3d_sent:
-                await _notify(bot, sub.user_id, REMINDER_TEXT[3])
-                sub.reminder_3d_sent = True
-            elif days_left == 1 and not sub.reminder_1d_sent:
-                await _notify(bot, sub.user_id, REMINDER_TEXT[1])
-                sub.reminder_1d_sent = True
+            if days_left == 3 and not conn.reminder_3d_sent:
+                await _notify(bot, conn.user_id, REMINDER_TEXT[3].format(name=conn.name))
+                conn.reminder_3d_sent = True
+            elif days_left == 1 and not conn.reminder_1d_sent:
+                await _notify(bot, conn.user_id, REMINDER_TEXT[1].format(name=conn.name))
+                conn.reminder_1d_sent = True
 
         await session.commit()
 
@@ -44,15 +44,15 @@ async def send_reminders(bot: Bot) -> None:
 async def expire_sweep(bot: Bot) -> None:
     async with async_session_maker() as session:
         now = dt.datetime.utcnow()
-        subs = (
+        conns = (
             await session.execute(
-                select(Subscription).where(Subscription.status == "active", Subscription.expires_at < now)
+                select(Connection).where(Connection.status == "active", Connection.expires_at < now)
             )
         ).scalars().all()
 
-        for sub in subs:
-            await deactivate(session, sub)
-            await _notify(bot, sub.user_id, "Ваша подписка истекла. Доступ к VPN ограничен.")
+        for conn in conns:
+            await deactivate(session, conn)
+            await _notify(bot, conn.user_id, f'Подключение «{conn.name}» истекло. Доступ ограничен.')
 
         await session.commit()
 

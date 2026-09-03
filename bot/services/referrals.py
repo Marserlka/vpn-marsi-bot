@@ -51,8 +51,15 @@ async def grant_bonus_for_payment(session: AsyncSession, user: User, payment: Pa
         )
 
     if bonus_days:
-        from bot.services.subscriptions import activate_or_extend
+        from bot.services.subscriptions import extend_connection, list_connections
 
-        await activate_or_extend(session, referrer.tg_id, bonus_days)
+        # A referrer can have several connections now (see TZ 3.5) — the
+        # bonus days go to whichever one is currently active; if they have
+        # none, there's nothing sensible to extend, so it's skipped (the
+        # cash bonus above still applies either way).
+        referrer_conns = await list_connections(session, referrer.tg_id)
+        target = next((c for c in referrer_conns if c.status == "active"), None)
+        if target:
+            await extend_connection(session, target, bonus_days)
 
     await session.flush()

@@ -41,10 +41,12 @@ def payment_confirmation_keyboard(payment_id: int) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def user_actions_keyboard(user_id: int) -> InlineKeyboardMarkup:
+def user_actions_keyboard(user_id: int, connections: list) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Продлить на 30 дн.", callback_data=f"admin:extend:{user_id}:30")
-    kb.button(text="⛔ Отключить", callback_data=f"admin:disable:{user_id}")
+    for conn in connections:
+        kb.button(text=f"➕30дн «{conn.name}»", callback_data=f"admin:extend:{conn.id}:30")
+        if conn.status == "active":
+            kb.button(text=f"⛔ «{conn.name}»", callback_data=f"admin:disable:{conn.id}")
     kb.button(text="💳 Пополнить баланс", callback_data=f"admin:topup:{user_id}")
     kb.button(text="⬅️ Админ-меню", callback_data="admin:main")
     kb.adjust(1)

@@ -9,16 +9,22 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
-from bot.database.models import Payment, ReferralBonus, Subscription, User
-from bot.keyboards.client import back_to_menu, manage_keyboard, profile_keyboard
-from bot.services.subscriptions import get_or_create_subscription, switch_protocol
+from bot.database.models import Connection, Payment, ReferralBonus, User
+from bot.keyboards.client import (
+    back_to_menu,
+    connection_card_keyboard,
+    connections_list_keyboard,
+    profile_keyboard,
+)
+from bot.services.subscriptions import (
+    deactivate,
+    get_connection,
+    list_connections,
+    regenerate_connection,
+    switch_protocol,
+)
 
 router = Router(name="profile")
-
-
-def random_config_filename() -> str:
-    suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
-    return f"NetherlMarsi[{suffix}].conf"
 
 PROTOCOL_LABELS = {
     "amnezia": "AmneziaWG (маскировка)",
@@ -38,75 +44,93 @@ PROTOCOL_IMPORT_HINT = {
     "vless": "скопируйте ссылку из файла и добавьте её в приложении («Добавить профиль по ссылке»)",
     "ss": "скопируйте ссылку из файла и добавьте её в приложении («Добавить профиль по ссылке»)",
 }
+REGION_LABELS = {"nl": "🇳🇱 Нидерланды"}
 
 
-def _status_line(sub: Subscription) -> str:
-    if sub.status == "active" and sub.expires_at:
-        return f"Статус: ✅ Активна до {sub.expires_at.strftime('%d.%m.%Y')}"
-    return "Статус: ❌ Истекла"
+def random_config_filename() -> str:
+    suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    return f"NetherlMarsi[{suffix}].conf"
+
+
+def _status_line(conn: Connection) -> str:
+    if conn.status == "active" and conn.expires_at:
+        return f"Статус: ✅ Активно до {conn.expires_at.strftime('%d.%m.%Y')}"
+    return "Статус: ❌ Истекло"
+
+
+def _connection_card_text(conn: Connection) -> str:
+    limit_note = (
+        "⚠️ Ограничение: 1 подключение = 1 устройство."
+        if conn.protocol in ("amnezia", "wireguard")
+        else "ℹ️ Для этого протокола ограничение на 1 устройство сейчас не действует."
+    )
+    return (
+        f"📡 {conn.name}\n\n"
+        f"{_status_line(conn)}\n"
+        f"Протокол: {PROTOCOL_LABELS.get(conn.protocol, conn.protocol)}\n"
+        f"Регион: {REGION_LABELS.get(conn.region, conn.region)}\n\n"
+        f"{limit_note}"
+    )
 
 
 @router.callback_query(F.data == "menu:profile")
 async def profile(callback: CallbackQuery, session: AsyncSession) -> None:
     user = await session.get(User, callback.from_user.id)
-    sub = await get_or_create_subscription(session, callback.from_user.id)
+    conns = await list_connections(session, callback.from_user.id)
+    active_count = sum(1 for c in conns if c.status == "active")
 
     text = (
         f"🌐 Личный кабинет\n\n"
-        f"{_status_line(sub)}\n"
-        f"Баланс: {user.balance} руб.\n\n"
-        f"⚠️ 1 подписка предназначена только для 1 устройства."
+        f"Баланс: {user.balance} руб.\n"
+        f"Активных подключений: {active_count}\n\n"
+        f"⚠️ Каждое подключение — 1 устройство."
     )
     await callback.message.edit_text(text, reply_markup=profile_keyboard())
     await callback.answer()
 
 
-def _manage_text(sub: Subscription) -> str:
-    limit_note = (
-        "⚠️ 1 подписка предназначена только для 1 устройства. При одновременном "
-        "включении на двух устройствах доступ автоматически блокируется."
-        if sub.protocol in ("amnezia", "wireguard")
-        else "ℹ️ Для этого протокола ограничение на 1 устройство сейчас не действует."
-    )
-    return (
-        f"⚙️ Управление подключениями\n\n"
-        f"{_status_line(sub)}\n"
-        f"Протокол: {PROTOCOL_LABELS.get(sub.protocol, sub.protocol)}\n\n"
-        f"{limit_note}"
-    )
+@router.callback_query(F.data == "menu:connections")
+async def connections_list(callback: CallbackQuery, session: AsyncSession) -> None:
+    conns = await list_connections(session, callback.from_user.id)
+    text = "📡 Мои подключения" if conns else "📡 Мои подключения\n\nПока нет ни одного подключения."
+    await callback.message.edit_text(text, reply_markup=connections_list_keyboard(conns))
+    await callback.answer()
 
 
-@router.callback_query(F.data == "menu:manage")
-async def manage(callback: CallbackQuery, session: AsyncSession) -> None:
-    sub = await get_or_create_subscription(session, callback.from_user.id)
+@router.callback_query(F.data.startswith("menu:connection:"))
+async def connection_card(callback: CallbackQuery, session: AsyncSession) -> None:
+    conn_id = int(callback.data.split(":")[-1])
+    conn = await get_connection(session, conn_id, callback.from_user.id)
+    if not conn:
+        await callback.answer("Подключение не найдено.", show_alert=True)
+        return
     await callback.message.edit_text(
-        _manage_text(sub),
-        reply_markup=manage_keyboard(
-            has_config=bool(sub.awg_config), is_active=sub.status == "active", protocol=sub.protocol
-        ),
+        _connection_card_text(conn),
+        reply_markup=connection_card_keyboard(conn),
     )
     await callback.answer()
 
 
-@router.callback_query(F.data == "menu:get_config")
+@router.callback_query(F.data.startswith("menu:get_config:"))
 async def get_config(callback: CallbackQuery, session: AsyncSession) -> None:
-    sub = await session.scalar(select(Subscription).where(Subscription.user_id == callback.from_user.id))
-    if not sub or not sub.awg_config or sub.status != "active":
-        await callback.answer("У вас нет активной подписки.", show_alert=True)
+    conn_id = int(callback.data.split(":")[-1])
+    conn = await get_connection(session, conn_id, callback.from_user.id)
+    if not conn or not conn.awg_config or conn.status != "active":
+        await callback.answer("Нет активного конфига.", show_alert=True)
         return
 
-    app_name = PROTOCOL_APP.get(sub.protocol, "приложение AmneziaVPN")
-    import_hint = PROTOCOL_IMPORT_HINT.get(sub.protocol, PROTOCOL_IMPORT_HINT["amnezia"])
+    app_name = PROTOCOL_APP.get(conn.protocol, "приложение AmneziaVPN")
+    import_hint = PROTOCOL_IMPORT_HINT.get(conn.protocol, PROTOCOL_IMPORT_HINT["amnezia"])
     limit_note = (
-        "⚠️ 1 подписка = 1 устройство."
-        if sub.protocol in ("amnezia", "wireguard")
+        "⚠️ 1 подключение = 1 устройство."
+        if conn.protocol in ("amnezia", "wireguard")
         else "ℹ️ Ограничение на 1 устройство для этого протокола пока не действует."
     )
-    file = BufferedInputFile(sub.awg_config.encode(), filename=random_config_filename())
+    file = BufferedInputFile(conn.awg_config.encode(), filename=random_config_filename())
     await callback.message.answer_document(
         file,
         caption=(
-            f"Ваш конфиг ({PROTOCOL_LABELS.get(sub.protocol, sub.protocol)}).\n\n"
+            f"«{conn.name}» — {PROTOCOL_LABELS.get(conn.protocol, conn.protocol)}.\n\n"
             f"1. Установите {app_name}.\n"
             f"2. {import_hint}.\n"
             "3. Подключитесь.\n\n"
@@ -116,25 +140,106 @@ async def get_config(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("menu:switch_protocol:"))
-async def switch_protocol_handler(callback: CallbackQuery, session: AsyncSession) -> None:
-    new_protocol = callback.data.split(":")[-1]
+@router.callback_query(F.data.startswith("menu:regen:"))
+async def regen_confirm(callback: CallbackQuery, session: AsyncSession) -> None:
+    conn_id = int(callback.data.split(":")[-1])
+    conn = await get_connection(session, conn_id, callback.from_user.id)
+    if not conn:
+        await callback.answer("Подключение не найдено.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        f"Обновить конфиг «{conn.name}»?\n\n"
+        "⚠️ Старый ключ сразу перестанет работать на всех устройствах, где он был "
+        "установлен — понадобится импортировать новый файл.",
+        reply_markup=_confirm_keyboard(f"menu:regen_do:{conn_id}", f"menu:connection:{conn_id}"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("menu:regen_do:"))
+async def regen_do(callback: CallbackQuery, session: AsyncSession) -> None:
+    conn_id = int(callback.data.split(":")[-1])
+    conn = await get_connection(session, conn_id, callback.from_user.id)
+    if not conn:
+        await callback.answer("Подключение не найдено.", show_alert=True)
+        return
     try:
-        sub = await switch_protocol(session, callback.from_user.id, new_protocol)
+        await regenerate_connection(session, conn)
+    except Exception as exc:
+        await callback.answer(f"Ошибка: {exc}", show_alert=True)
+        raise
+    await callback.answer("Конфиг обновлён", show_alert=True)
+    await callback.message.edit_text(_connection_card_text(conn), reply_markup=connection_card_keyboard(conn))
+
+
+@router.callback_query(F.data.startswith("menu:switch:"))
+async def switch_protocol_menu(callback: CallbackQuery, session: AsyncSession) -> None:
+    conn_id = int(callback.data.split(":")[-1])
+    conn = await get_connection(session, conn_id, callback.from_user.id)
+    if not conn:
+        await callback.answer("Подключение не найдено.", show_alert=True)
+        return
+    from bot.keyboards.client import protocol_switch_keyboard
+
+    await callback.message.edit_text(
+        f"Сменить протокол для «{conn.name}»:", reply_markup=protocol_switch_keyboard(conn)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("menu:switch_do:"))
+async def switch_protocol_do(callback: CallbackQuery, session: AsyncSession) -> None:
+    _, _, conn_id_str, new_protocol = callback.data.split(":")
+    conn = await get_connection(session, int(conn_id_str), callback.from_user.id)
+    if not conn:
+        await callback.answer("Подключение не найдено.", show_alert=True)
+        return
+    try:
+        await switch_protocol(session, conn, new_protocol)
     except ValueError:
-        await callback.answer("Нет активной подписки.", show_alert=True)
+        await callback.answer("Подключение неактивно.", show_alert=True)
         return
     except Exception as exc:
         await callback.answer(f"Ошибка: {exc}", show_alert=True)
         raise
-
     await callback.answer(f"Протокол изменён на {PROTOCOL_LABELS.get(new_protocol, new_protocol)}", show_alert=True)
+    await callback.message.edit_text(_connection_card_text(conn), reply_markup=connection_card_keyboard(conn))
+
+
+@router.callback_query(F.data.startswith("menu:disable:"))
+async def disable_confirm(callback: CallbackQuery, session: AsyncSession) -> None:
+    conn_id = int(callback.data.split(":")[-1])
+    conn = await get_connection(session, conn_id, callback.from_user.id)
+    if not conn:
+        await callback.answer("Подключение не найдено.", show_alert=True)
+        return
     await callback.message.edit_text(
-        _manage_text(sub),
-        reply_markup=manage_keyboard(
-            has_config=bool(sub.awg_config), is_active=sub.status == "active", protocol=sub.protocol
-        ),
+        f"Отключить «{conn.name}»? Доступ прекратится сразу, деньги за оставшиеся дни не возвращаются.",
+        reply_markup=_confirm_keyboard(f"menu:disable_do:{conn_id}", f"menu:connection:{conn_id}"),
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("menu:disable_do:"))
+async def disable_do(callback: CallbackQuery, session: AsyncSession) -> None:
+    conn_id = int(callback.data.split(":")[-1])
+    conn = await get_connection(session, conn_id, callback.from_user.id)
+    if not conn:
+        await callback.answer("Подключение не найдено.", show_alert=True)
+        return
+    await deactivate(session, conn)
+    await callback.answer("Отключено", show_alert=True)
+    await callback.message.edit_text(_connection_card_text(conn), reply_markup=connection_card_keyboard(conn))
+
+
+def _confirm_keyboard(yes_data: str, no_data: str):
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Да", callback_data=yes_data)
+    kb.button(text="⬅️ Отмена", callback_data=no_data)
+    kb.adjust(1)
+    return kb.as_markup()
 
 
 @router.callback_query(F.data == "menu:referral")

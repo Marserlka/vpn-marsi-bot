@@ -6,7 +6,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import Subscription
+from bot.database.models import Connection
 from bot.services.awg_agent import awg_agent
 from bot.services.marzban import marzban_client
 
@@ -23,7 +23,7 @@ async def _provision(user_id: int, protocol: str, expire_at: dt.datetime) -> tup
     AmneziaWG/WireGuard public key for the WG family, a Marzban username for
     the VLESS/Shadowsocks family.
     """
-    label = f"user_{user_id}"
+    label = f"user_{user_id}_{int(dt.datetime.utcnow().timestamp())}"
     if protocol in WG_FAMILY:
         peer = await awg_agent.create_peer(label=label, protocol=protocol)
         return peer["public_key"], peer["client_config"]
@@ -43,85 +43,103 @@ async def _deprovision(identity: str, protocol: str) -> None:
         logger.exception("Failed to remove %s peer/user %s", protocol, identity)
 
 
-async def get_or_create_subscription(session: AsyncSession, user_id: int) -> Subscription:
-    sub = await session.scalar(select(Subscription).where(Subscription.user_id == user_id))
-    if sub is None:
-        sub = Subscription(user_id=user_id, status="inactive")
-        session.add(sub)
-        await session.flush()
-    return sub
+async def list_connections(session: AsyncSession, user_id: int) -> list[Connection]:
+    result = await session.execute(
+        select(Connection).where(Connection.user_id == user_id).order_by(Connection.id)
+    )
+    return list(result.scalars().all())
 
 
-async def activate_or_extend(
-    session: AsyncSession, user_id: int, period_days: int, protocol: str | None = None
-) -> Subscription:
-    """Create (first purchase) or extend (renewal) the user's VPN access.
-
-    Four protocols are available (see TZ 3.2-3.4): AmneziaWG (default,
-    obfuscated), plain WireGuard (faster, no obfuscation), and VLESS-Reality
-    / Shadowsocks via Marzban. `protocol` picks which one a freshly-created
-    peer uses; existing peers keep their protocol unless the caller passes a
-    new one. A peer has no built-in expiry, so our own `expires_at` is the
-    source of truth — the scheduler's expire_sweep() removes it when it
-    lapses. If the subscription is still within its current period (renewal
-    before expiry) and the protocol isn't changing, the peer already exists
-    and we simply push `expires_at` out. A lapsed subscription's peer was
-    already deleted by expire_sweep(), so reactivating it means requesting a
-    brand-new one — the bot just resends the fresh config.
-    """
-    sub = await get_or_create_subscription(session, user_id)
-    now = dt.datetime.utcnow()
-    target_protocol = protocol or sub.protocol
-
-    needs_new_peer = (
-        sub.awg_public_key is None or sub.status != "active" or target_protocol != sub.protocol
+async def get_connection(session: AsyncSession, connection_id: int, user_id: int) -> Connection | None:
+    return await session.scalar(
+        select(Connection).where(Connection.id == connection_id, Connection.user_id == user_id)
     )
 
-    if needs_new_peer:
-        if sub.awg_public_key and sub.status == "active":
-            await _deprovision(sub.awg_public_key, sub.protocol)
+
+async def create_connection(
+    session: AsyncSession, user_id: int, name: str, protocol: str, region: str, period_days: int
+) -> Connection:
+    """Provision a brand-new, paid connection. Always makes a new peer/user
+    — unlike the old single-subscription model, there's no "existing one to
+    extend" here, this is called once per purchase of a new connection."""
+    now = dt.datetime.utcnow()
+    expire_at = now + dt.timedelta(days=period_days)
+    identity, config = await _provision(user_id, protocol, expire_at)
+
+    conn = Connection(
+        user_id=user_id,
+        name=name,
+        protocol=protocol,
+        region=region,
+        awg_public_key=identity,
+        awg_config=config,
+        status="active",
+        expires_at=expire_at,
+    )
+    session.add(conn)
+    await session.flush()
+    return conn
+
+
+async def extend_connection(session: AsyncSession, conn: Connection, period_days: int) -> Connection:
+    """Renew an existing connection. If it lapsed, its peer/user was already
+    removed by expire_sweep(), so this re-provisions a fresh one; otherwise
+    it just pushes `expires_at` out."""
+    now = dt.datetime.utcnow()
+    if conn.status != "active" or conn.awg_public_key is None:
         new_expire = now + dt.timedelta(days=period_days)
-        identity, config = await _provision(user_id, target_protocol, new_expire)
-        sub.awg_public_key = identity
-        sub.awg_config = config
-        sub.protocol = target_protocol
+        identity, config = await _provision(conn.user_id, conn.protocol, new_expire)
+        conn.awg_public_key = identity
+        conn.awg_config = config
     else:
-        base = sub.expires_at if (sub.expires_at and sub.expires_at > now) else now
+        base = conn.expires_at if (conn.expires_at and conn.expires_at > now) else now
         new_expire = base + dt.timedelta(days=period_days)
-        if sub.protocol in MARZBAN_FAMILY:
-            await marzban_client.modify_expire(sub.awg_public_key, new_expire)
+        if conn.protocol in MARZBAN_FAMILY:
+            await marzban_client.modify_expire(conn.awg_public_key, new_expire)
 
-    sub.expires_at = new_expire
-    sub.status = "active"
-    sub.reminder_3d_sent = False
-    sub.reminder_1d_sent = False
+    conn.expires_at = new_expire
+    conn.status = "active"
+    conn.reminder_3d_sent = False
+    conn.reminder_1d_sent = False
     await session.flush()
-    return sub
+    return conn
 
 
-async def switch_protocol(session: AsyncSession, user_id: int, new_protocol: str) -> Subscription:
-    """Move an active subscription's peer to a different protocol, keeping
-    `expires_at` untouched — unlike activate_or_extend, this isn't a
-    purchase, just a client-side preference (see TZ 3.3-3.4)."""
-    sub = await get_or_create_subscription(session, user_id)
-    if sub.status != "active":
-        raise ValueError("subscription is not active")
-    if sub.protocol == new_protocol:
-        return sub
-
-    if sub.awg_public_key:
-        await _deprovision(sub.awg_public_key, sub.protocol)
-
-    identity, config = await _provision(user_id, new_protocol, sub.expires_at)
-    sub.awg_public_key = identity
-    sub.awg_config = config
-    sub.protocol = new_protocol
+async def regenerate_connection(session: AsyncSession, conn: Connection) -> Connection:
+    """Kill the current peer/user and issue a fresh one for the same
+    connection — same name/protocol/region/expiry, new keys."""
+    if conn.awg_public_key:
+        await _deprovision(conn.awg_public_key, conn.protocol)
+    expire_at = conn.expires_at or (dt.datetime.utcnow() + dt.timedelta(days=30))
+    identity, config = await _provision(conn.user_id, conn.protocol, expire_at)
+    conn.awg_public_key = identity
+    conn.awg_config = config
     await session.flush()
-    return sub
+    return conn
 
 
-async def deactivate(session: AsyncSession, sub: Subscription) -> None:
-    if sub.awg_public_key:
-        await _deprovision(sub.awg_public_key, sub.protocol)
-    sub.status = "expired"
+async def switch_protocol(session: AsyncSession, conn: Connection, new_protocol: str) -> Connection:
+    """Move a connection to a different protocol, keeping `expires_at`
+    untouched — a client-side preference, not a purchase."""
+    if conn.status != "active":
+        raise ValueError("connection is not active")
+    if conn.protocol == new_protocol:
+        return conn
+
+    if conn.awg_public_key:
+        await _deprovision(conn.awg_public_key, conn.protocol)
+
+    expire_at = conn.expires_at or (dt.datetime.utcnow() + dt.timedelta(days=30))
+    identity, config = await _provision(conn.user_id, new_protocol, expire_at)
+    conn.awg_public_key = identity
+    conn.awg_config = config
+    conn.protocol = new_protocol
+    await session.flush()
+    return conn
+
+
+async def deactivate(session: AsyncSession, conn: Connection) -> None:
+    if conn.awg_public_key:
+        await _deprovision(conn.awg_public_key, conn.protocol)
+    conn.status = "expired"
     await session.flush()

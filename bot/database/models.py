@@ -20,25 +20,32 @@ class User(Base):
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
 
-    subscription: Mapped["Subscription"] = relationship(back_populates="user", uselist=False)
+    connections: Mapped[list["Connection"]] = relationship(back_populates="user")
 
 
-class Subscription(Base):
-    __tablename__ = "subscriptions"
+class Connection(Base):
+    """One VPN connection (peer/user on the server side). A user can have
+    several of these at once (see TZ 3.5) — each is its own paid, named,
+    independently-managed VPN identity, not tied to the others."""
+
+    __tablename__ = "subscriptions"  # kept for continuity with existing data/migrations
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.tg_id"), unique=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.tg_id"))
+    name: Mapped[str] = mapped_column(String(64), default="Подключение")
+    region: Mapped[str] = mapped_column(String(16), default="nl")  # only "nl" for now
     marzban_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     subscription_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     awg_public_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     awg_config: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    protocol: Mapped[str] = mapped_column(String(16), default="amnezia")  # amnezia/wireguard
+    protocol: Mapped[str] = mapped_column(String(16), default="amnezia")  # amnezia/wireguard/vless/ss
     expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="inactive")  # inactive/active/expired
     reminder_3d_sent: Mapped[bool] = mapped_column(Boolean, default=False)
     reminder_1d_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
 
-    user: Mapped["User"] = relationship(back_populates="subscription")
+    user: Mapped["User"] = relationship(back_populates="connections")
 
 
 class Payment(Base):
@@ -51,6 +58,12 @@ class Payment(Base):
     provider: Mapped[str] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending/paid/failed
     purpose: Mapped[str] = mapped_column(String(16), default="subscription")  # subscription/balance_topup
+    # Which connection this pays for. Null when creating a brand-new one
+    # (it doesn't exist yet — apply_paid_payment creates it) or for a
+    # balance top-up (no connection involved at all).
+    connection_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("subscriptions.id"), nullable=True)
+    new_connection_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    new_connection_protocol: Mapped[str | None] = mapped_column(String(16), nullable=True)
     promo_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
     invoice_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())

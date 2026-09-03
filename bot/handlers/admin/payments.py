@@ -26,7 +26,7 @@ async def confirm_payment(callback: CallbackQuery, session: AsyncSession, bot: B
 
     payment.status = "paid"
     payment.paid_at = dt.datetime.utcnow()
-    await apply_paid_payment(session, payment)
+    conn = await apply_paid_payment(session, payment)
 
     await callback.message.edit_text(callback.message.text + "\n\n✅ Подтверждено")
     await callback.answer("Платёж подтверждён")
@@ -35,8 +35,8 @@ async def confirm_payment(callback: CallbackQuery, session: AsyncSession, bot: B
         if payment.purpose == "balance_topup":
             await bot.send_message(payment.user_id, f"✅ Баланс пополнен на {payment.amount} руб.")
         else:
-            await bot.send_message(payment.user_id, "✅ Оплата подтверждена! Подписка активирована.")
-            await deliver_config(bot, session, payment.user_id)
+            await bot.send_message(payment.user_id, "✅ Оплата подтверждена! Подключение активировано.")
+            await deliver_config(bot, session, conn)
     except Exception:
         pass
 

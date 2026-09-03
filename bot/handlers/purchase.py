@@ -10,10 +10,12 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
-from bot.database.models import BalanceTransaction, Payment, Subscription, User
+from bot.database.models import BalanceTransaction, Payment, User
 from bot.keyboards.admin import payment_confirmation_keyboard
 from bot.keyboards.client import (
     back_to_menu,
+    create_protocol_keyboard,
+    create_region_keyboard,
     legal_docs_keyboard,
     payment_methods_keyboard,
     plans_keyboard,
@@ -22,30 +24,84 @@ from bot.keyboards.client import (
 )
 from bot.services.payments import DEFAULT_PROVIDER, PROVIDERS
 from bot.services.promocodes import PromoError, activate_promo, apply_discount, get_valid_promo
+from bot.services.subscriptions import get_connection
 
 logger = logging.getLogger("bot.purchase")
 router = Router(name="purchase")
 
 PLANS_TEXT = (
-    "Выберите срок продления подписки.\n\n"
-    "✅ Подписка включает доступ для 1 устройства.\n\n"
-    "Оплачивая подписку, вы подтверждаете, что принимаете:\n"
+    "Выберите срок действия подключения.\n\n"
+    "Оплачивая, вы подтверждаете, что принимаете:\n"
     "1️⃣ Политику конфиденциальности\n"
     "2️⃣ Условия использования\n\n"
     "📄 Все документы доступны по кнопке «Политика / Условия»."
 )
 
 
+class CreateStates(StatesGroup):
+    waiting_name = State()
+
+
 class BuyStates(StatesGroup):
     waiting_promo = State()
 
 
-@router.callback_query(F.data == "menu:buy")
-async def choose_plan(callback: CallbackQuery, state: FSMContext) -> None:
+# --- new connection wizard: name -> protocol -> region -> plan -> ... -------
+
+@router.callback_query(F.data == "create:start")
+async def create_start(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
+    await state.set_state(CreateStates.waiting_name)
+    await callback.message.edit_text(
+        "Введите название подключения (для себя, ни на что не влияет, например «Ноутбук» или «Телефон»):",
+        reply_markup=back_to_menu(),
+    )
+    await callback.answer()
+
+
+@router.message(CreateStates.waiting_name)
+async def create_name_entered(message: Message, state: FSMContext) -> None:
+    name = message.text.strip()[:64]
+    if not name:
+        await message.answer("Название не может быть пустым. Введите ещё раз:")
+        return
+    await state.update_data(mode="new", name=name)
+    await state.set_state(None)
+    await message.answer("Выберите протокол подключения:", reply_markup=create_protocol_keyboard())
+
+
+@router.callback_query(F.data.startswith("create:protocol:"))
+async def create_protocol_chosen(callback: CallbackQuery, state: FSMContext) -> None:
+    protocol = callback.data.split(":")[-1]
+    await state.update_data(protocol=protocol)
+    await callback.message.edit_text("Выберите регион сервера:", reply_markup=create_region_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("create:region:"))
+async def create_region_chosen(callback: CallbackQuery, state: FSMContext) -> None:
+    region = callback.data.split(":")[-1]
+    await state.update_data(region=region)
     await callback.message.edit_text(PLANS_TEXT, reply_markup=plans_keyboard())
     await callback.answer()
 
+
+# --- extend an existing connection ------------------------------------------
+
+@router.callback_query(F.data.startswith("menu:extend:"))
+async def extend_start(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    conn_id = int(callback.data.split(":")[-1])
+    conn = await get_connection(session, conn_id, callback.from_user.id)
+    if not conn:
+        await callback.answer("Подключение не найдено.", show_alert=True)
+        return
+    await state.clear()
+    await state.update_data(mode="extend", conn_id=conn_id)
+    await callback.message.edit_text(PLANS_TEXT, reply_markup=plans_keyboard())
+    await callback.answer()
+
+
+# --- shared: plan -> promo -> payment method --------------------------------
 
 @router.callback_query(F.data == "buy:legal")
 async def show_legal(callback: CallbackQuery) -> None:
@@ -111,12 +167,30 @@ async def skip_promo(callback: CallbackQuery, state: FSMContext, session: AsyncS
     await callback.answer()
 
 
+def _build_payment(data: dict, user_id: int, price: int, provider: str, status: str, promo_code: str | None) -> Payment:
+    plan = settings.plans[data["plan_idx"]]
+    payment = Payment(
+        user_id=user_id,
+        amount=price,
+        period_days=plan.period_days,
+        provider=provider,
+        status=status,
+        promo_code=promo_code,
+    )
+    if data.get("mode") == "extend":
+        payment.purpose = "extend_connection"
+        payment.connection_id = data["conn_id"]
+    else:
+        payment.purpose = "new_connection"
+        payment.new_connection_name = data.get("name", "Подключение")
+        payment.new_connection_protocol = data.get("protocol", "amnezia")
+    return payment
+
+
 @router.callback_query(F.data == "buy:pay:balance")
 async def pay_with_balance(callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot: Bot) -> None:
     data = await state.get_data()
-    plan = settings.plans[data["plan_idx"]]
-    price = data.get("price", plan.price_rub)
-    promo_code = data.get("promo_code")
+    price = data.get("price", settings.plans[data["plan_idx"]].price_rub)
 
     user = await session.get(User, callback.from_user.id)
     if user.balance < price:
@@ -126,24 +200,17 @@ async def pay_with_balance(callback: CallbackQuery, state: FSMContext, session: 
     user.balance -= price
     session.add(BalanceTransaction(user_id=user.tg_id, delta=-price, reason="purchase"))
 
-    payment = Payment(
-        user_id=user.tg_id,
-        amount=price,
-        period_days=plan.period_days,
-        provider="balance",
-        status="paid",
-        purpose="subscription",
-        promo_code=promo_code,
-        paid_at=dt.datetime.utcnow(),
-    )
+    payment = _build_payment(data, user.tg_id, price, "balance", "paid", data.get("promo_code"))
+    payment.paid_at = dt.datetime.utcnow()
     session.add(payment)
     await session.flush()
 
-    await apply_paid_payment(session, payment)
+    conn = await apply_paid_payment(session, payment)
     await state.clear()
 
-    await callback.message.edit_text("✅ Оплачено с баланса! Подписка активирована.")
-    await deliver_config(bot, session, user.tg_id)
+    await callback.message.edit_text("✅ Оплачено с баланса! Подключение активировано.")
+    if conn:
+        await deliver_config(bot, session, conn)
     await callback.answer()
 
 
@@ -161,16 +228,8 @@ async def create_payment(callback: CallbackQuery, state: FSMContext, session: As
     invoice = await provider.create_invoice(
         user_id=callback.from_user.id, amount=price, description=f"VPN MARSI {plan.period_days} дн."
     )
-    payment = Payment(
-        user_id=callback.from_user.id,
-        amount=price,
-        period_days=plan.period_days,
-        provider=provider.name,
-        status="pending",
-        purpose="subscription",
-        promo_code=promo_code,
-        invoice_id=invoice.invoice_id,
-    )
+    payment = _build_payment(data, callback.from_user.id, price, provider.name, "pending", promo_code)
+    payment.invoice_id = invoice.invoice_id
     session.add(payment)
     await session.flush()
     payment_id = payment.id
@@ -190,6 +249,7 @@ async def create_payment(callback: CallbackQuery, state: FSMContext, session: As
                 f"💰 Новый платёж #{payment_id}\n"
                 f"Пользователь: {callback.from_user.id} (@{callback.from_user.username})\n"
                 f"Сумма: {price} руб., период: {plan.period_days} дн.\n"
+                f"Тип: {'продление' if payment.purpose == 'extend_connection' else 'новое подключение'}\n"
                 f"Промокод: {promo_code or '—'}",
                 reply_markup=payment_confirmation_keyboard(payment_id),
             )
@@ -204,28 +264,25 @@ async def confirm_paid_by_user(callback: CallbackQuery) -> None:
     await callback.answer("Спасибо! Ожидайте подтверждения администратором.", show_alert=True)
 
 
-async def deliver_config(bot: Bot, session: AsyncSession, user_id: int) -> None:
-    """Sends the user's current VPN .conf as a document, if they have one."""
-    from sqlalchemy import select
-
+async def deliver_config(bot: Bot, session: AsyncSession, conn) -> None:
+    """Sends a connection's current VPN .conf as a document, if it has one."""
     from bot.handlers.profile import PROTOCOL_APP, PROTOCOL_IMPORT_HINT, PROTOCOL_LABELS, random_config_filename
 
-    sub = await session.scalar(select(Subscription).where(Subscription.user_id == user_id))
-    if not sub or not sub.awg_config:
+    if not conn or not conn.awg_config:
         return
-    app_name = PROTOCOL_APP.get(sub.protocol, "приложение AmneziaVPN")
-    import_hint = PROTOCOL_IMPORT_HINT.get(sub.protocol, PROTOCOL_IMPORT_HINT["amnezia"])
+    app_name = PROTOCOL_APP.get(conn.protocol, "приложение AmneziaVPN")
+    import_hint = PROTOCOL_IMPORT_HINT.get(conn.protocol, PROTOCOL_IMPORT_HINT["amnezia"])
     limit_note = (
-        "⚠️ 1 подписка = 1 устройство."
-        if sub.protocol in ("amnezia", "wireguard")
+        "⚠️ 1 подключение = 1 устройство."
+        if conn.protocol in ("amnezia", "wireguard")
         else "ℹ️ Ограничение на 1 устройство для этого протокола пока не действует."
     )
-    file = BufferedInputFile(sub.awg_config.encode(), filename=random_config_filename())
+    file = BufferedInputFile(conn.awg_config.encode(), filename=random_config_filename())
     await bot.send_document(
-        user_id,
+        conn.user_id,
         file,
         caption=(
-            f"Ваш конфиг ({PROTOCOL_LABELS.get(sub.protocol, sub.protocol)}).\n\n"
+            f"«{conn.name}» — {PROTOCOL_LABELS.get(conn.protocol, conn.protocol)}.\n\n"
             f"1. Установите {app_name}.\n"
             f"2. {import_hint}.\n"
             "3. Подключитесь.\n\n"
@@ -234,13 +291,13 @@ async def deliver_config(bot: Bot, session: AsyncSession, user_id: int) -> None:
     )
 
 
-async def apply_paid_payment(session: AsyncSession, payment: Payment) -> None:
+async def apply_paid_payment(session: AsyncSession, payment: Payment):
     """Shared by the admin confirmation handler and balance-payment flow.
 
-    For a subscription payment: activates it, consumes the promo code and
-    grants the referrer their recurring bonus (30% of this payment + 3 days).
-    For a balance top-up: just credits the user's balance — no subscription,
-    promo, or referral bonus involved.
+    Returns the affected Connection (or None for a balance top-up).
+    Consumes the promo code and grants the referrer their recurring bonus
+    (30% of this payment + 3 days) for connection payments — not for
+    balance top-ups.
     """
     user = await session.get(User, payment.user_id)
 
@@ -248,12 +305,26 @@ async def apply_paid_payment(session: AsyncSession, payment: Payment) -> None:
         user.balance += payment.amount
         session.add(BalanceTransaction(user_id=user.tg_id, delta=payment.amount, reason="topup"))
         await session.flush()
-        return
+        return None
 
     from bot.services.referrals import grant_bonus_for_payment
-    from bot.services.subscriptions import activate_or_extend
+    from bot.services.subscriptions import create_connection, extend_connection
 
-    await activate_or_extend(session, payment.user_id, payment.period_days)
+    if payment.purpose == "extend_connection":
+        conn = await get_connection(session, payment.connection_id, payment.user_id)
+        if conn is None:
+            raise ValueError(f"connection {payment.connection_id} not found for payment {payment.id}")
+        conn = await extend_connection(session, conn, payment.period_days)
+    else:
+        conn = await create_connection(
+            session,
+            payment.user_id,
+            payment.new_connection_name or "Подключение",
+            payment.new_connection_protocol or "amnezia",
+            "nl",
+            payment.period_days,
+        )
+    payment.connection_id = conn.id
 
     if payment.promo_code:
         try:
@@ -263,3 +334,4 @@ async def apply_paid_payment(session: AsyncSession, payment: Payment) -> None:
             pass  # already consumed or expired between creation and confirmation; ignore
 
     await grant_bonus_for_payment(session, user, payment)
+    return conn

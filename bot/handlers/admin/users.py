@@ -62,16 +62,31 @@ async def do_search(message: Message, state: FSMContext, session: AsyncSession) 
 @router.callback_query(F.data.startswith("admin:extend:"))
 async def extend_user(callback: CallbackQuery, session: AsyncSession) -> None:
     _, _, user_id_str, days_str = callback.data.split(":")
-    await activate_or_extend(session, int(user_id_str), int(days_str))
+    user_id = int(user_id_str)
+    try:
+        await activate_or_extend(session, user_id, int(days_str))
+    except Exception as exc:
+        await callback.answer(f"Ошибка: {exc}", show_alert=True)
+        raise
     await callback.answer("Подписка продлена", show_alert=True)
+    user = await session.get(User, user_id)
+    if user:
+        await _render_user_card(callback.message, session, user)
 
 
 @router.callback_query(F.data.startswith("admin:disable:"))
 async def disable_user(callback: CallbackQuery, session: AsyncSession) -> None:
     user_id = int(callback.data.split(":")[-1])
     sub = await get_or_create_subscription(session, user_id)
-    await deactivate(session, sub)
+    try:
+        await deactivate(session, sub)
+    except Exception as exc:
+        await callback.answer(f"Ошибка: {exc}", show_alert=True)
+        raise
     await callback.answer("Подписка отключена", show_alert=True)
+    user = await session.get(User, user_id)
+    if user:
+        await _render_user_card(callback.message, session, user)
 
 
 @router.callback_query(F.data.startswith("admin:topup:"))

@@ -14,6 +14,7 @@ def main_menu() -> InlineKeyboardMarkup:
     kb.button(text="📥 Инструкции", callback_data="menu:instructions")
     kb.button(text="🆘 Поддержка", callback_data="menu:support")
     kb.button(text="🎁 Бонус за друга", callback_data="menu:referral")
+    kb.button(text="📄 Политика / Условия", callback_data="menu:legal")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -65,7 +66,7 @@ def legal_docs_keyboard() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="🔒 Политика конфиденциальности", url=settings.PRIVACY_POLICY_URL)
     kb.button(text="📄 Условия использования", url=settings.TERMS_URL)
-    kb.button(text="⬅️ Назад", callback_data="menu:buy")
+    kb.button(text="⬅️ Главное меню", callback_data="menu:main")
     kb.adjust(1)
     return kb.as_markup()
 

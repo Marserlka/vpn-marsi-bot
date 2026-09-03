@@ -5,7 +5,7 @@ from aiogram.types import CallbackQuery
 
 from bot.config import settings
 from bot.handlers.start import WELCOME_TEXT
-from bot.keyboards.client import back_to_menu, main_menu
+from bot.keyboards.client import back_to_menu, legal_docs_keyboard, main_menu
 
 router = Router(name="menu")
 
@@ -27,6 +27,14 @@ async def instructions(callback: CallbackQuery) -> None:
         "Если что-то не работает — обратитесь в поддержку."
     )
     await callback.message.edit_text(text, reply_markup=back_to_menu())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu:legal")
+async def legal(callback: CallbackQuery) -> None:
+    await callback.message.edit_text(
+        "📄 Правовые документы сервиса:", reply_markup=legal_docs_keyboard()
+    )
     await callback.answer()
 
 

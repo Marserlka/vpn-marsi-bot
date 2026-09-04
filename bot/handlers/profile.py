@@ -50,7 +50,7 @@ REGION_LABELS = {"nl": "🇳🇱 Нидерланды"}
 
 def random_config_filename() -> str:
     suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
-    return f"NetherlMarsi[{suffix}].conf"
+    return f"NetherlMarsi-{suffix}.conf"
 
 
 def _status_line(conn: Connection) -> str:

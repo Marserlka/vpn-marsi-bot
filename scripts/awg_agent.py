@@ -261,12 +261,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
+class TLSServer(http.server.ThreadingHTTPServer):
+    """Wraps each *accepted connection* in TLS, not the listening socket.
+
+    Wrapping the listening socket (the common but broken pattern) makes the
+    TLS handshake part of accept() itself, on the single shared accept
+    loop — one client that connects and never completes (or stalls) the
+    handshake then blocks every other connection behind it forever. This
+    server stayed up but stopped answering anything after ~11 minutes in
+    production from exactly that: a stalled handshake, most likely just
+    port-scanning noise (any freshly-provisioned VPS gets scanned within
+    minutes), silently wedged the whole agent.
+    """
+
+    def __init__(self, *args, ssl_context: ssl.SSLContext, **kwargs):
+        self._ssl_context = ssl_context
+        super().__init__(*args, **kwargs)
+
+    def get_request(self):
+        sock, addr = super().get_request()
+        sock.settimeout(10.0)  # bound the handshake so a stalled client can't wedge this thread forever
+        wrapped = self._ssl_context.wrap_socket(sock, server_side=True)
+        wrapped.settimeout(None)
+        return wrapped, addr
+
+
 def main() -> None:
     port = int(os.environ.get("AWG_AGENT_PORT", "443"))
-    server = http.server.ThreadingHTTPServer(("0.0.0.0", port), Handler)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(CERT_FILE, KEY_FILE)
-    server.socket = ctx.wrap_socket(server.socket, server_side=True)
+    server = TLSServer(("0.0.0.0", port), Handler, ssl_context=ctx)
     server.serve_forever()
 
 

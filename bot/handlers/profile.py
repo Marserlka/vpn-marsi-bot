@@ -17,6 +17,7 @@ from bot.keyboards.client import (
     profile_keyboard,
 )
 from bot.services.subscriptions import (
+    MARZBAN_FAMILY,
     deactivate,
     get_connection,
     list_connections,
@@ -111,6 +112,32 @@ async def connection_card(callback: CallbackQuery, session: AsyncSession) -> Non
     await callback.answer()
 
 
+async def send_connection_config(bot, chat_id: int, conn: Connection) -> None:
+    """Delivers a connection's config the right way for its protocol:
+    WireGuard/AmneziaWG need an importable .conf file; VLESS/Shadowsocks
+    are a single link that's useless as a file attachment (Telegram won't
+    preview it, so the user would have to download and open it just to
+    copy one line) — send those as plain copyable text instead."""
+    app_name = PROTOCOL_APP.get(conn.protocol, "приложение AmneziaVPN")
+    import_hint = PROTOCOL_IMPORT_HINT.get(conn.protocol, PROTOCOL_IMPORT_HINT["amnezia"])
+    limit_note = (
+        "⚠️ 1 подключение = 1 устройство."
+        if conn.protocol not in MARZBAN_FAMILY
+        else "ℹ️ Ограничение на 1 устройство для этого протокола пока не действует."
+    )
+    header = f"«{conn.name}» — {PROTOCOL_LABELS.get(conn.protocol, conn.protocol)}."
+    steps = f"1. Установите {app_name}.\n2. {import_hint}.\n3. Подключитесь.\n\n{limit_note}"
+
+    if conn.protocol in MARZBAN_FAMILY:
+        import html as html_lib
+
+        text = f"{header}\n\n<code>{html_lib.escape(conn.awg_config)}</code>\n\n{steps}"
+        await bot.send_message(chat_id, text, parse_mode="HTML")
+    else:
+        file = BufferedInputFile(conn.awg_config.encode(), filename=random_config_filename())
+        await bot.send_document(chat_id, file, caption=f"{header}\n\n{steps}")
+
+
 @router.callback_query(F.data.startswith("menu:get_config:"))
 async def get_config(callback: CallbackQuery, session: AsyncSession) -> None:
     conn_id = int(callback.data.split(":")[-1])
@@ -119,24 +146,7 @@ async def get_config(callback: CallbackQuery, session: AsyncSession) -> None:
         await callback.answer("Нет активного конфига.", show_alert=True)
         return
 
-    app_name = PROTOCOL_APP.get(conn.protocol, "приложение AmneziaVPN")
-    import_hint = PROTOCOL_IMPORT_HINT.get(conn.protocol, PROTOCOL_IMPORT_HINT["amnezia"])
-    limit_note = (
-        "⚠️ 1 подключение = 1 устройство."
-        if conn.protocol in ("amnezia", "wireguard")
-        else "ℹ️ Ограничение на 1 устройство для этого протокола пока не действует."
-    )
-    file = BufferedInputFile(conn.awg_config.encode(), filename=random_config_filename())
-    await callback.message.answer_document(
-        file,
-        caption=(
-            f"«{conn.name}» — {PROTOCOL_LABELS.get(conn.protocol, conn.protocol)}.\n\n"
-            f"1. Установите {app_name}.\n"
-            f"2. {import_hint}.\n"
-            "3. Подключитесь.\n\n"
-            f"{limit_note}"
-        ),
-    )
+    await send_connection_config(callback.bot, callback.message.chat.id, conn)
     await callback.answer()
 
 

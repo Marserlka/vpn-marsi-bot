@@ -6,7 +6,7 @@ import logging
 from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
@@ -265,30 +265,13 @@ async def confirm_paid_by_user(callback: CallbackQuery) -> None:
 
 
 async def deliver_config(bot: Bot, session: AsyncSession, conn) -> None:
-    """Sends a connection's current VPN .conf as a document, if it has one."""
-    from bot.handlers.profile import PROTOCOL_APP, PROTOCOL_IMPORT_HINT, PROTOCOL_LABELS, random_config_filename
+    """Sends a connection's config (file or copyable text, depending on
+    protocol — see profile.send_connection_config), if it has one."""
+    from bot.handlers.profile import send_connection_config
 
     if not conn or not conn.awg_config:
         return
-    app_name = PROTOCOL_APP.get(conn.protocol, "приложение AmneziaVPN")
-    import_hint = PROTOCOL_IMPORT_HINT.get(conn.protocol, PROTOCOL_IMPORT_HINT["amnezia"])
-    limit_note = (
-        "⚠️ 1 подключение = 1 устройство."
-        if conn.protocol in ("amnezia", "wireguard")
-        else "ℹ️ Ограничение на 1 устройство для этого протокола пока не действует."
-    )
-    file = BufferedInputFile(conn.awg_config.encode(), filename=random_config_filename())
-    await bot.send_document(
-        conn.user_id,
-        file,
-        caption=(
-            f"«{conn.name}» — {PROTOCOL_LABELS.get(conn.protocol, conn.protocol)}.\n\n"
-            f"1. Установите {app_name}.\n"
-            f"2. {import_hint}.\n"
-            "3. Подключитесь.\n\n"
-            f"{limit_note}"
-        ),
-    )
+    await send_connection_config(bot, conn.user_id, conn)
 
 
 async def apply_paid_payment(session: AsyncSession, payment: Payment):

@@ -39,10 +39,18 @@ Required environment variables:
   AWG_TLS_CERTFILE         path to the fullchain.pem used for this agent's HTTPS
   AWG_TLS_KEYFILE          path to the matching private key
 Optional:
-  AWG_CONF_DIR (default /etc/amnezia/amneziawg)
+  AWG_CONF_DIR (default /opt/amnezia/awg — path *inside* AWG_DOCKER_CONTAINER
+                when that's set, since the official AmneziaVPN container
+                keeps its config there; a plain host path otherwise)
+  AWG_DOCKER_CONTAINER (default unset — when set, every `awg`/conf-file
+                op for the amnezia protocol runs via `docker exec` into
+                this container instead of against a host-native interface;
+                see the PROTOCOLS["amnezia"] comment below)
+  AWG_STATE_DIR (default /etc/amnezia/amneziawg — always a host path; our
+                own peers.json bookkeeping never lives inside the container)
   AWG_INTERFACE (default awg0)
   AWG_SUBNET (default 10.29.29.0/24)
-  AWG_BIN (default /usr/local/bin/awg)
+  AWG_BIN (default /usr/bin/awg)
   WG_CONF_DIR (default /etc/wireguard)
   WG_INTERFACE (default wg0)
   WG_SUBNET (default 10.29.31.0/24)
@@ -78,15 +86,28 @@ AMNEZIA_CLIENT_PARAMS = (
 
 PROTOCOLS = {
     "amnezia": {
-        "dir": os.environ.get("AWG_CONF_DIR", "/etc/amnezia/amneziawg"),
+        # As of 2026-09-04 this protocol runs inside the official AmneziaVPN
+        # Docker container (see scripts/deploy_official_awg.md / TZ) instead
+        # of our old hand-built host-native amneziawg-go install — the
+        # official container bakes in `sysctl net.ipv4.conf.all.src_valid_mark=1`,
+        # which our install lacked and which WireGuard-family fwmark policy
+        # routing needs whenever reverse-path filtering is on. When
+        # AWG_DOCKER_CONTAINER is set, every `awg`/conf-file operation below
+        # is routed through `docker exec` into that container instead of
+        # running against a host-native interface.
+        "dir": os.environ.get("AWG_CONF_DIR", "/opt/amnezia/awg"),
         "conf_name": "awg0.conf",
         "state_name": "peers.json",
         "interface": os.environ.get("AWG_INTERFACE", "awg0"),
         "subnet": ipaddress.ip_network(os.environ.get("AWG_SUBNET", "10.29.29.0/24")),
-        "bin": os.environ.get("AWG_BIN", "/usr/local/bin/awg"),
+        "bin": os.environ.get("AWG_BIN", "/usr/bin/awg"),
         "endpoint": os.environ["AWG_SERVER_ENDPOINT"],
         "server_public_key": os.environ["AWG_SERVER_PUBLIC_KEY"],
         "client_params": AMNEZIA_CLIENT_PARAMS,
+        "docker_container": os.environ.get("AWG_DOCKER_CONTAINER", ""),
+        # peers.json is bot-agent bookkeeping only — always kept on the host,
+        # never inside the (disposable) container.
+        "state_dir": os.environ.get("AWG_STATE_DIR", "/etc/amnezia/amneziawg"),
     },
     "wireguard": {
         "dir": os.environ.get("WG_CONF_DIR", "/etc/wireguard"),
@@ -98,6 +119,8 @@ PROTOCOLS = {
         "endpoint": os.environ["WG_SERVER_ENDPOINT"],
         "server_public_key": os.environ["WG_SERVER_PUBLIC_KEY"],
         "client_params": "MTU = 1280\n",
+        "docker_container": "",
+        "state_dir": os.environ.get("WG_CONF_DIR", "/etc/wireguard"),
     },
 }
 
@@ -109,11 +132,34 @@ def _conf_file(p: dict) -> str:
 
 
 def _state_file(p: dict) -> str:
-    return os.path.join(p["dir"], p["state_name"])
+    return os.path.join(p["state_dir"], p["state_name"])
 
 
 def _server_addr(p: dict) -> str:
     return str(next(p["subnet"].hosts()))
+
+
+def _tool_cmd(p: dict, args: list[str]) -> list[str]:
+    """Wraps an `awg`/`wg` invocation with `docker exec` when this protocol's
+    interface lives inside a container (see PROTOCOLS["amnezia"])."""
+    if p.get("docker_container"):
+        return ["docker", "exec", "-i", p["docker_container"], *args]
+    return args
+
+
+def _read_conf(p: dict) -> str:
+    if p.get("docker_container"):
+        return _run(["docker", "exec", p["docker_container"], "cat", _conf_file(p)])
+    with open(_conf_file(p)) as f:
+        return f.read()
+
+
+def _write_conf(p: dict, content: str) -> None:
+    if p.get("docker_container"):
+        _run(["docker", "exec", "-i", p["docker_container"], "sh", "-c", f"cat > {_conf_file(p)}"], input_data=content)
+    else:
+        with open(_conf_file(p), "w") as f:
+            f.write(content)
 
 
 def _load_state(p: dict) -> dict:
@@ -125,6 +171,7 @@ def _load_state(p: dict) -> dict:
 
 
 def _save_state(p: dict, state: dict) -> None:
+    os.makedirs(p["state_dir"], exist_ok=True)
     with open(_state_file(p), "w") as f:
         json.dump(state, f, indent=2)
 
@@ -148,15 +195,15 @@ def create_peer(label: str, protocol: str) -> dict:
     p = PROTOCOLS[protocol]
     with _lock:
         state = _load_state(p)
-        priv = _run([p["bin"], "genkey"])
-        pub = _run([p["bin"], "pubkey"], input_data=priv)
-        psk = _run([p["bin"], "genpsk"])
+        priv = _run(_tool_cmd(p, [p["bin"], "genkey"]))
+        pub = _run(_tool_cmd(p, [p["bin"], "pubkey"]), input_data=priv)
+        psk = _run(_tool_cmd(p, [p["bin"], "genpsk"]))
         ip = _next_free_ip(p, state)
 
-        _run([
+        _run(_tool_cmd(p, [
             p["bin"], "set", p["interface"], "peer", pub,
             "preshared-key", "/dev/stdin", "allowed-ips", f"{ip}/32",
-        ], input_data=psk)
+        ]), input_data=psk)
 
         state["peers"][pub] = {"label": label, "ip": ip, "psk": psk}
         _save_state(p, state)
@@ -186,7 +233,7 @@ def delete_peer(pubkey: str, protocol: str) -> bool:
         state = _load_state(p)
         if pubkey not in state["peers"]:
             return False
-        subprocess.run([p["bin"], "set", p["interface"], "peer", pubkey, "remove"], check=False)
+        subprocess.run(_tool_cmd(p, [p["bin"], "set", p["interface"], "peer", pubkey, "remove"]), check=False)
         del state["peers"][pubkey]
         _save_state(p, state)
         _persist_conf(p, state)
@@ -195,16 +242,13 @@ def delete_peer(pubkey: str, protocol: str) -> bool:
 
 def _persist_conf(p: dict, state: dict) -> None:
     """Rewrite the interface's conf file's [Peer] blocks so peers survive a reboot."""
-    conf_file = _conf_file(p)
-    with open(conf_file) as f:
-        content = f.read()
+    content = _read_conf(p)
     header = content.split("[Peer]")[0].rstrip() + "\n"
     blocks = [header]
     for pub, info in state["peers"].items():
         psk_line = f"PresharedKey = {info['psk']}\n" if info.get("psk") else ""
         blocks.append(f"\n[Peer]\nPublicKey = {pub}\n{psk_line}AllowedIPs = {info['ip']}/32\n")
-    with open(conf_file, "w") as f:
-        f.write("".join(blocks))
+    _write_conf(p, "".join(blocks))
 
 
 class Handler(http.server.BaseHTTPRequestHandler):

@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     MARZBAN_ADMIN_PASSWORD: str = ""
     MARZBAN_INBOUND_TAG: str = "VLESS-Reality"
     MARZBAN_SS_INBOUND_TAG: str = "Shadowsocks-TCP"
-    MARZBAN_SNI_MASK: str = "addons.mozilla.org"
+    MARZBAN_SNI_MASK: str = "docker.com"
 
     # AmneziaWG peer-management agent (default protocol — see TZ 3.2 for why
     # VLESS-Reality was originally demoted, and TZ 3.4 for why it's back as

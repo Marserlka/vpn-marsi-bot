@@ -4,7 +4,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from bot.config import settings
-from bot.database.models import Base
+from bot.database.models import Base, Connection
 
 engine = create_async_engine(settings.DB_URL, echo=False)
 async_session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
@@ -32,29 +32,75 @@ def _add_missing_columns(sync_conn) -> None:
 def _backfill_connection_defaults(sync_conn) -> None:
     """`_add_missing_columns` adds new columns with no value on existing
     rows (Python-side `default=` doesn't apply retroactively) — give
-    pre-existing connections a sane `name`/`region` instead of NULL."""
-    sync_conn.exec_driver_sql(
-        "UPDATE subscriptions SET name = 'Подключение' WHERE name IS NULL"
-    )
-    sync_conn.exec_driver_sql(
-        "UPDATE subscriptions SET region = 'nl' WHERE region IS NULL"
-    )
+    pre-existing connections real values instead of NULL for every
+    NOT NULL column, so the table-rebuild in `_drop_subscriptions_user_unique`
+    (which needs this already clean) doesn't have to special-case anything.
+    Uses bound parameters, not string-formatted SQL — inlining non-ASCII
+    literals (e.g. "Подключение") into raw SQL text has a real encoding
+    footgun, confirmed by testing this migration locally.
+    """
+    inspector = inspect(sync_conn)
+    if "subscriptions" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("subscriptions")}
+    for column in Connection.__table__.columns:
+        if column.nullable or column.name not in existing:
+            continue
+        if column.name == "created_at":
+            sync_conn.exec_driver_sql(
+                'UPDATE subscriptions SET "created_at" = CURRENT_TIMESTAMP WHERE "created_at" IS NULL'
+            )
+        elif column.default is not None and getattr(column.default, "is_scalar", False):
+            sync_conn.execute(
+                text(f'UPDATE subscriptions SET "{column.name}" = :val WHERE "{column.name}" IS NULL'),
+                {"val": column.default.arg},
+            )
 
 
 def _drop_subscriptions_user_unique(sync_conn) -> None:
     """The `subscriptions` table (now the `Connection` model) originally had
     `user_id UNIQUE` from the 1-subscription-per-user era (see TZ 3.5) — a
-    second connection for the same user now needs to insert fine, so drop
-    any unique index covering just that column on an already-deployed DB.
+    second connection for the same user now needs to insert fine.
+
+    SQLite auto-creates an index for a `UNIQUE` declared inline on a column
+    (origin='u'); that kind of index can't be dropped with `DROP INDEX` —
+    it's intrinsic to the table definition ("index associated with UNIQUE
+    or PRIMARY KEY constraint cannot be dropped"). The only way to remove
+    it is to rebuild the table without the constraint, so that's what this
+    does when it detects that case; a plain `CREATE UNIQUE INDEX` (origin=
+    'c', from some earlier ad-hoc migration) can just be dropped directly.
     """
     rows = sync_conn.exec_driver_sql("PRAGMA index_list('subscriptions')").fetchall()
+    target = None
     for row in rows:
-        index_name, is_unique = row[1], row[2]
+        index_name, is_unique, origin = row[1], row[2], row[3]
         if not is_unique:
             continue
         cols = sync_conn.exec_driver_sql(f'PRAGMA index_info("{index_name}")').fetchall()
         if [c[2] for c in cols] == ["user_id"]:
-            sync_conn.exec_driver_sql(f'DROP INDEX "{index_name}"')
+            target = (index_name, origin)
+            break
+    if target is None:
+        return
+
+    index_name, origin = target
+    if origin != "u":
+        sync_conn.exec_driver_sql(f'DROP INDEX "{index_name}"')
+        return
+
+    # By this point `_backfill_connection_defaults` has already run, so every
+    # NOT NULL column is populated — a plain column-for-column copy is safe.
+    inspector = inspect(sync_conn)
+    old_columns = {col["name"] for col in inspector.get_columns("subscriptions")}
+    shared = [c.name for c in Connection.__table__.columns if c.name in old_columns]
+    cols_sql = ", ".join(f'"{c}"' for c in shared)
+
+    sync_conn.exec_driver_sql("ALTER TABLE subscriptions RENAME TO subscriptions_old")
+    Connection.__table__.create(sync_conn)
+    sync_conn.exec_driver_sql(
+        f'INSERT INTO subscriptions ({cols_sql}) SELECT {cols_sql} FROM subscriptions_old'
+    )
+    sync_conn.exec_driver_sql("DROP TABLE subscriptions_old")
 
 
 async def init_db() -> None:

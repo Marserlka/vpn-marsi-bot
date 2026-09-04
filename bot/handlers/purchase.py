@@ -304,7 +304,7 @@ async def apply_paid_payment(session: AsyncSession, payment: Payment):
             payment.user_id,
             payment.new_connection_name or "Подключение",
             payment.new_connection_protocol or "amnezia",
-            "nl",
+            "de",
             payment.period_days,
         )
     payment.connection_id = conn.id

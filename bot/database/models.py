@@ -33,7 +33,7 @@ class Connection(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.tg_id"))
     name: Mapped[str] = mapped_column(String(64), default="Подключение")
-    region: Mapped[str] = mapped_column(String(16), default="nl")  # only "nl" for now
+    region: Mapped[str] = mapped_column(String(16), default="de")  # only "de" for now
     marzban_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     subscription_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     awg_public_key: Mapped[str | None] = mapped_column(String(64), nullable=True)

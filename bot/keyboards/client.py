@@ -11,7 +11,7 @@ PROTOCOL_CHOICES = {
     "vless": "VLESS-Reality",
     "ss": "Shadowsocks",
 }
-REGION_CHOICES = {"nl": "🇳🇱 Нидерланды"}
+REGION_CHOICES = {"de": "🇩🇪 Германия"}
 
 
 def main_menu() -> InlineKeyboardMarkup:

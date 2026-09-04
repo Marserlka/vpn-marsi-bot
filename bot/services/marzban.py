@@ -71,9 +71,17 @@ class MarzbanClient:
 
     async def create_user(self, username: str, expire_at: dt.datetime, protocol: str = "vless") -> dict:
         """protocol is "vless" (Reality over xhttp — no vision flow, that's a
-        TCP-transport-only optimization) or "ss" (Shadowsocks)."""
+        TCP-transport-only optimization) or "ss" (Shadowsocks).
+
+        Shadowsocks cipher is aes-256-gcm, not the more commonly-default
+        chacha20-ietf-poly1305 — this VPS's CPU has AES-NI (confirmed via
+        the aesni_intel kernel module), and ChaCha20 exists specifically to
+        be fast in software *without* hardware AES acceleration, so it's
+        the wrong choice here. WireGuard/AmneziaWG aren't affected by this —
+        their cipher is fixed to ChaCha20-Poly1305 by the protocol itself.
+        """
         if protocol == "ss":
-            proxies = {"shadowsocks": {"method": "chacha20-ietf-poly1305"}}
+            proxies = {"shadowsocks": {"method": "aes-256-gcm"}}
             inbounds = {"shadowsocks": [settings.MARZBAN_SS_INBOUND_TAG]}
         else:
             proxies = {"vless": {}}

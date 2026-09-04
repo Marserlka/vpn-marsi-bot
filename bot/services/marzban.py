@@ -103,7 +103,16 @@ class MarzbanClient:
             "status": "active",
         }
         resp = await self._request("POST", "/api/user", json=payload)
-        return resp.json()
+        data = resp.json()
+        if protocol == "vless" and data.get("links"):
+            # Marzban hardcodes fp=chrome in its link template; there's no
+            # API field to override it, so patch the already-built link.
+            # "random" varies the TLS ClientHello fingerprint per
+            # connection instead of always presenting the same one, which
+            # is the generally-recommended Reality setting (a competitor's
+            # working config used it too — see TZ 3.6).
+            data["links"] = [link.replace("fp=chrome", "fp=random") for link in data["links"]]
+        return data
 
     async def get_user(self, username: str) -> dict | None:
         try:

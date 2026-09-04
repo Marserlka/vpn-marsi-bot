@@ -70,8 +70,16 @@ class MarzbanClient:
         return resp
 
     async def create_user(self, username: str, expire_at: dt.datetime, protocol: str = "vless") -> dict:
-        """protocol is "vless" (Reality over xhttp — no vision flow, that's a
-        TCP-transport-only optimization) or "ss" (Shadowsocks).
+        """protocol is "vless" (Reality over plain tcp) or "ss" (Shadowsocks).
+
+        VLESS-Reality briefly used the xhttp transport (see TZ 3.4) but that
+        was reverted (TZ 3.6) — several real client apps/cores (sing-box,
+        and even a build labelled "Xray TUN") failed to route traffic over
+        it correctly despite our own server-side Xray handling it fine in
+        every test. Plain tcp is what every VLESS client supports without
+        exception, so that's what we use, paired with the standard
+        xtls-rprx-vision flow (a tcp-transport-only optimization — do not
+        set this if xhttp ever comes back).
 
         Shadowsocks cipher is aes-256-gcm, not the more commonly-default
         chacha20-ietf-poly1305 — this VPS's CPU has AES-NI (confirmed via
@@ -84,7 +92,7 @@ class MarzbanClient:
             proxies = {"shadowsocks": {"method": "aes-256-gcm"}}
             inbounds = {"shadowsocks": [settings.MARZBAN_SS_INBOUND_TAG]}
         else:
-            proxies = {"vless": {}}
+            proxies = {"vless": {"flow": "xtls-rprx-vision"}}
             inbounds = {"vless": [settings.MARZBAN_INBOUND_TAG]}
         payload = {
             "username": username,

@@ -38,17 +38,28 @@ CAPTCHA_TEXT = (
 )
 
 
-@router.message(CommandStart())
-async def cmd_start(message: Message, command: CommandObject, session: AsyncSession) -> None:
-    user = await session.get(User, message.from_user.id)
+async def get_or_create_user(session: AsyncSession, tg_id: int, username: str | None) -> tuple[User, bool]:
+    """Shared by cmd_start and check_force_sub — a user who hits the
+    force-subscribe gate on their very first /start never reaches cmd_start
+    at all (the middleware blocks it before the handler runs), so without
+    this, check_force_sub would show the main menu for someone who has no
+    User row yet at all, and the first button they press (e.g. «Личный
+    кабинет») would crash on a None user (found 2026-09-05)."""
+    user = await session.get(User, tg_id)
     is_new = user is None
     if user is None:
-        user = User(tg_id=message.from_user.id, username=message.from_user.username, balance=settings.WELCOME_BONUS_RUB)
+        user = User(tg_id=tg_id, username=username, balance=settings.WELCOME_BONUS_RUB)
         session.add(user)
         await session.flush()
         session.add(BalanceTransaction(user_id=user.tg_id, delta=settings.WELCOME_BONUS_RUB, reason="welcome_bonus"))
-    elif user.username != message.from_user.username:
-        user.username = message.from_user.username
+    elif user.username != username:
+        user.username = username
+    return user, is_new
+
+
+@router.message(CommandStart())
+async def cmd_start(message: Message, command: CommandObject, session: AsyncSession) -> None:
+    user, is_new = await get_or_create_user(session, message.from_user.id, message.from_user.username)
 
     if is_new and command.args and command.args.startswith("ref_"):
         try:
@@ -92,8 +103,8 @@ async def verify_captcha(callback: CallbackQuery, session: AsyncSession) -> None
 async def check_force_sub(callback: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
     row = await get_settings(session)
     if not row.force_sub_enabled or not row.force_sub_channel_id:
-        await callback.message.answer(welcome_text(), reply_markup=main_menu(row.force_sub_channel_url))
-        await callback.answer()
+        await get_or_create_user(session, callback.from_user.id, callback.from_user.username)
+        await _finish_force_sub(callback, row)
         return
 
     try:
@@ -106,5 +117,17 @@ async def check_force_sub(callback: CallbackQuery, session: AsyncSession, bot: B
         await callback.answer("Не вижу вашей подписки. Подпишитесь и попробуйте снова.", show_alert=True)
         return
 
-    await callback.message.answer(welcome_text(), reply_markup=main_menu(row.force_sub_channel_url))
+    await get_or_create_user(session, callback.from_user.id, callback.from_user.username)
+    await _finish_force_sub(callback, row)
+
+
+async def _finish_force_sub(callback: CallbackQuery, row) -> None:
+    """Edits the existing prompt in place instead of posting a fresh welcome
+    message every time — a repeat tap on «Я подписался» (double-click, or a
+    retry after the alert) used to spam a brand-new message each time since
+    this used to call .answer() unconditionally (found 2026-09-05)."""
+    try:
+        await callback.message.edit_text(welcome_text(), reply_markup=main_menu(row.force_sub_channel_url))
+    except TelegramBadRequest:
+        pass  # already showing this exact text/markup — nothing to change
     await callback.answer("Спасибо! Доступ открыт.")

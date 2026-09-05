@@ -24,11 +24,11 @@ WELCOME_IMAGE = Path(__file__).resolve().parent.parent / "assets" / "welcome.jpg
 def welcome_text() -> str:
     """A function, not a module-level constant, so the price can never go
     stale again the way the old hardcoded "30 руб./месяц" did after tariffs
-    changed to 50/100/150 — always reads the current cheapest plan."""
-    cheapest = min(settings.plans, key=lambda p: p.price_rub)
+    changed to 50/100/150 — always reads the current live rate (per-day
+    billing since 2026-09-05, see TZ)."""
     return (
         "Добро пожаловать в Marsi VPN!\n\n"
-        f"Стоимость подписки — от {cheapest.price_rub}{pe('price')} руб./месяц."
+        f"Стоимость — {settings.PRICE_PER_DAY_RUB}{pe('price')} руб./день за подключение."
     )
 
 CAPTCHA_TEXT = (

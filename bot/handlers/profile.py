@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import random
 import string
 
@@ -9,18 +10,16 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
-from bot.database.models import Connection, Payment, ReferralBonus, User
+from bot.database.models import Connection, ReferralBonus, User
 from bot.keyboards.client import (
     back_to_menu,
     connection_card_keyboard,
     connections_list_keyboard,
     profile_keyboard,
 )
-from bot.services.referrals import claim_pending_bonus_days, pending_bonus_days
 from bot.services.subscriptions import (
     MARZBAN_FAMILY,
     deactivate,
-    extend_connection,
     get_connection,
     list_connections,
     regenerate_connection,
@@ -30,6 +29,8 @@ from bot.utils.emoji import pe
 from bot.utils.nav import render
 
 router = Router(name="profile")
+
+MIN_CONNECTION_AGE = dt.timedelta(days=settings.MIN_CONNECTION_AGE_DAYS)
 
 PROTOCOL_LABELS = {
     "amnezia": "AmneziaWG (маскировка)",
@@ -46,10 +47,10 @@ PROTOCOL_APP = {
 PROTOCOL_IMPORT_HINT = {
     "amnezia": "«Добавить конфигурацию» → «Импортировать из файла» → выберите этот файл",
     "wireguard": "«Добавить конфигурацию» → «Импортировать из файла» → выберите этот файл",
-    "vless": "нажмите на ссылку выше, чтобы скопировать её, и добавьте в приложении («Добавить профиль по ссылке»)",
-    "ss": "нажмите на ссылку выше, чтобы скопировать её, и добавьте в приложении («Добавить профиль по ссылке»)",
+    "vless": "нажмите на ссылку выше, чтобы скопировать её, и добавьте в приложении («Добавить подписку по ссылке»)",
+    "ss": "нажмите на ссылку выше, чтобы скопировать её, и добавьте в приложении («Добавить подписку по ссылке»)",
 }
-REGION_LABELS = {"de": "🇩🇪 Германия"}
+REGION_LABELS = {"de": "🇩🇪 Германия", "all": "🌍 Все регионы"}
 
 
 def random_config_filename() -> str:
@@ -58,9 +59,14 @@ def random_config_filename() -> str:
 
 
 def _status_line(conn: Connection) -> str:
-    if conn.status == "active" and conn.expires_at:
-        return f"Статус: ✅ Активно до {conn.expires_at.strftime('%d.%m.%Y')}"
-    return "Статус: ❌ Истекло"
+    if conn.status == "active":
+        return "Статус: ✅ Активно"
+    return "Статус: ❌ Удалено"
+
+
+def _connection_age_left(conn: Connection) -> dt.timedelta:
+    age = dt.datetime.utcnow() - conn.created_at
+    return MIN_CONNECTION_AGE - age
 
 
 def _connection_card_text(conn: Connection) -> str:
@@ -69,11 +75,24 @@ def _connection_card_text(conn: Connection) -> str:
         if conn.protocol in ("amnezia", "wireguard")
         else "ℹ️ Для этого протокола ограничение на 1 устройство сейчас не действует."
     )
+    billing_note = ""
+    if conn.status == "active" and conn.next_charge_at:
+        billing_note = (
+            f"\nСледующее списание: {conn.next_charge_at.strftime('%d.%m.%Y')} "
+            f"({settings.PRICE_PER_DAY_RUB} руб./день)"
+        )
+    lock_left = _connection_age_left(conn)
+    lock_note = (
+        f"\n🔒 Удаление станет доступно через {lock_left.days + 1} дн."
+        if conn.status == "active" and lock_left.total_seconds() > 0
+        else ""
+    )
     return (
-        f"📡 {conn.name}\n\n"
+        f"{pe('connections')} {conn.name}\n\n"
         f"{_status_line(conn)}\n"
         f"Протокол: {PROTOCOL_LABELS.get(conn.protocol, conn.protocol)}\n"
-        f"Регион: {REGION_LABELS.get(conn.region, conn.region)}\n\n"
+        f"Регион: {REGION_LABELS.get(conn.region, conn.region)}"
+        f"{billing_note}{lock_note}\n\n"
         f"{limit_note}"
     )
 
@@ -97,7 +116,8 @@ async def profile(callback: CallbackQuery, session: AsyncSession) -> None:
 @router.callback_query(F.data == "menu:connections")
 async def connections_list(callback: CallbackQuery, session: AsyncSession) -> None:
     conns = await list_connections(session, callback.from_user.id)
-    text = "📡 Мои подключения" if conns else "📡 Мои подключения\n\nПока нет ни одного подключения."
+    header = f"{pe('connections')} Мои подключения"
+    text = header if conns else f"{header}\n\nПока нет ни одного подключения."
     await callback.message.edit_text(text, reply_markup=connections_list_keyboard(conns))
     await callback.answer()
 
@@ -109,32 +129,11 @@ async def connection_card(callback: CallbackQuery, session: AsyncSession) -> Non
     if not conn:
         await callback.answer("Подключение не найдено.", show_alert=True)
         return
-    pending_days = await pending_bonus_days(session, callback.from_user.id)
     await callback.message.edit_text(
         _connection_card_text(conn),
-        reply_markup=connection_card_keyboard(conn, pending_days),
+        reply_markup=connection_card_keyboard(conn),
     )
     await callback.answer()
-
-
-@router.callback_query(F.data.startswith("refbonus:apply:"))
-async def apply_referral_bonus(callback: CallbackQuery, session: AsyncSession) -> None:
-    conn_id = int(callback.data.split(":")[-1])
-    conn = await get_connection(session, conn_id, callback.from_user.id)
-    if not conn:
-        await callback.answer("Подключение не найдено.", show_alert=True)
-        return
-    days = await claim_pending_bonus_days(session, callback.from_user.id, conn_id)
-    if not days:
-        await callback.answer("Нет доступных бонусных дней.", show_alert=True)
-        return
-    conn = await extend_connection(session, conn, days)
-    pending_days = await pending_bonus_days(session, callback.from_user.id)
-    await callback.message.edit_text(
-        _connection_card_text(conn),
-        reply_markup=connection_card_keyboard(conn, pending_days),
-    )
-    await callback.answer(f"Начислено {days} дн.!")
 
 
 async def send_connection_config(bot, chat_id: int, conn: Connection) -> None:
@@ -175,6 +174,34 @@ async def get_config(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("menu:vless_keys:"))
+async def vless_keys(callback: CallbackQuery, session: AsyncSession) -> None:
+    """Since 2026-09-05 «Получить конфиг» sends the Marzban subscription URL,
+    not a raw vless://ss:// link (see subscriptions.py:_provision — needed
+    for custom-routing JSON templates later). Some clients/advanced users
+    still want the individual per-inbound keys behind that subscription —
+    this fetches them straight from Marzban and shows them as copyable text."""
+    conn_id = int(callback.data.split(":")[-1])
+    conn = await get_connection(session, conn_id, callback.from_user.id)
+    if not conn or conn.protocol not in MARZBAN_FAMILY or conn.status != "active" or not conn.awg_public_key:
+        await callback.answer("Недоступно для этого подключения.", show_alert=True)
+        return
+
+    from bot.services.marzban import marzban_client
+
+    user_data = await marzban_client.get_user(conn.awg_public_key)
+    links = (user_data or {}).get("links") or []
+    if not links:
+        await callback.answer("Ключи не найдены.", show_alert=True)
+        return
+
+    import html as html_lib
+
+    body = "\n\n".join(f"<code>{html_lib.escape(link)}</code>" for link in links)
+    await callback.message.answer(f"🔑 Ключи «{conn.name}»:\n\n{body}", parse_mode="HTML")
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("menu:regen:"))
 async def regen_confirm(callback: CallbackQuery, session: AsyncSession) -> None:
     conn_id = int(callback.data.split(":")[-1])
@@ -183,7 +210,7 @@ async def regen_confirm(callback: CallbackQuery, session: AsyncSession) -> None:
         await callback.answer("Подключение не найдено.", show_alert=True)
         return
     await callback.message.edit_text(
-        f"Обновить конфиг «{conn.name}»?\n\n"
+        f"{pe('update_config')} Обновить конфиг «{conn.name}»?\n\n"
         "⚠️ Старый ключ сразу перестанет работать на всех устройствах, где он был "
         "установлен — понадобится импортировать новый файл.",
         reply_markup=_confirm_keyboard(f"menu:regen_do:{conn_id}", f"menu:connection:{conn_id}"),
@@ -217,7 +244,7 @@ async def switch_protocol_menu(callback: CallbackQuery, session: AsyncSession) -
     from bot.keyboards.client import protocol_switch_keyboard
 
     await callback.message.edit_text(
-        f"Сменить протокол для «{conn.name}»:", reply_markup=protocol_switch_keyboard(conn)
+        f"{pe('switch_protocol')} Сменить протокол для «{conn.name}»:", reply_markup=protocol_switch_keyboard(conn)
     )
     await callback.answer()
 
@@ -248,8 +275,16 @@ async def disable_confirm(callback: CallbackQuery, session: AsyncSession) -> Non
     if not conn:
         await callback.answer("Подключение не найдено.", show_alert=True)
         return
+    lock_left = _connection_age_left(conn)
+    if lock_left.total_seconds() > 0:
+        await callback.answer(
+            f"Удалить можно не раньше чем через {settings.MIN_CONNECTION_AGE_DAYS} дней после создания "
+            f"(осталось ещё {lock_left.days + 1} дн.).",
+            show_alert=True,
+        )
+        return
     await callback.message.edit_text(
-        f"Удалить «{conn.name}»? Доступ прекратится сразу, деньги за оставшиеся дни не возвращаются.",
+        f"{pe('delete')} Удалить «{conn.name}»? Доступ прекратится сразу, деньги за оставшиеся дни не возвращаются.",
         reply_markup=_confirm_keyboard(f"menu:disable_do:{conn_id}", f"menu:connection:{conn_id}"),
     )
     await callback.answer()
@@ -261,6 +296,12 @@ async def disable_do(callback: CallbackQuery, session: AsyncSession) -> None:
     conn = await get_connection(session, conn_id, callback.from_user.id)
     if not conn:
         await callback.answer("Подключение не найдено.", show_alert=True)
+        return
+    if _connection_age_left(conn).total_seconds() > 0:
+        await callback.answer(
+            f"Удалить можно не раньше чем через {settings.MIN_CONNECTION_AGE_DAYS} дней после создания.",
+            show_alert=True,
+        )
         return
     await deactivate(session, conn)
     await callback.answer("Удалено", show_alert=True)
@@ -285,28 +326,19 @@ async def referral(callback: CallbackQuery, session: AsyncSession) -> None:
     invited_count = await session.scalar(
         select(func.count()).select_from(User).where(User.referrer_id == callback.from_user.id)
     )
-    paid_count = await session.scalar(
-        select(func.count(func.distinct(Payment.user_id)))
-        .select_from(Payment)
-        .join(User, User.tg_id == Payment.user_id)
-        .where(User.referrer_id == callback.from_user.id, Payment.status == "paid")
-    )
-    bonuses = await session.execute(
-        select(ReferralBonus).where(ReferralBonus.referrer_id == callback.from_user.id)
-    )
-    bonuses = bonuses.scalars().all()
-    total_days = sum(b.bonus_days for b in bonuses)
-    pending_days = await pending_bonus_days(session, callback.from_user.id)
+    bonuses = (
+        await session.execute(select(ReferralBonus).where(ReferralBonus.referrer_id == callback.from_user.id))
+    ).scalars().all()
+    total_amount = sum(b.bonus_amount for b in bonuses)
 
     text = (
-        "🎁 Бонус за друга\n\n"
-        f"Получайте {settings.REFERRAL_BONUS_DAYS} дня подписки за каждую оплату приглашённого "
-        "друга, не только за первую — сами выбираете, к какому подключению их добавить.\n\n"
+        f"{pe('invite')} Бонус за друга\n\n"
+        f"Приглашайте друзей — получайте {settings.REFERRAL_BONUS_RUB} руб. на баланс, как только "
+        "приглашённый впервые пополнит свой баланс (один раз за каждого друга).\n\n"
         f"Ваша ссылка:\n{link}\n\n"
         f"Приглашено: {invited_count or 0}\n"
-        f"Оплатили подписку: {paid_count or 0}\n"
-        f"Заработано всего: {total_days} дн."
-        + (f" (из них {pending_days} дн. ждут выбора подключения)" if pending_days else "")
+        f"Пополнили баланс: {len(bonuses)}\n"
+        f"Заработано всего: {total_amount} руб."
     )
     await render(callback, text, back_to_menu())
     await callback.answer()

@@ -48,14 +48,6 @@ def profile_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def referral_bonus_keyboard(connections: list) -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    for conn in connections:
-        kb.button(text=conn.name, callback_data=f"refbonus:apply:{conn.id}")
-    kb.adjust(1)
-    return kb.as_markup()
-
-
 def connections_list_keyboard(connections: list) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for conn in connections:
@@ -67,18 +59,22 @@ def connections_list_keyboard(connections: list) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def connection_card_keyboard(conn, pending_bonus_days: int = 0) -> InlineKeyboardMarkup:
-    # "Продлить" removed 2026-09-05 (admin is reworking how renewal works —
-    # see TZ) — disable/delete still uses the same menu:disable:* flow
-    # under the hood, just relabeled "Удалить" per the new icon set.
+def connection_card_keyboard(conn) -> InlineKeyboardMarkup:
+    # "Продлить" removed 2026-09-05 (subscriptions are billed per-day from
+    # balance now, there's nothing to buy more of — see TZ) — disable/delete
+    # still uses the same menu:disable:* flow under the hood, just relabeled
+    # "Удалить" per the new icon set.
     kb = InlineKeyboardBuilder()
     if conn.status == "active":
         kb.button(text="Получить конфиг", callback_data=f"menu:get_config:{conn.id}", icon_custom_emoji_id=PE_ID["get_config"])
         kb.button(text="Обновить конфиг", callback_data=f"menu:regen:{conn.id}", icon_custom_emoji_id=PE_ID["update_config"])
         kb.button(text="Сменить протокол", callback_data=f"menu:switch:{conn.id}", icon_custom_emoji_id=PE_ID["switch_protocol"])
+        # Subscription-URL delivery (2026-09-05) bundles multiple per-inbound
+        # keys behind one link — this lets advanced users grab them
+        # individually instead of relying on the client's subscription import.
+        if conn.protocol in ("vless", "ss"):
+            kb.button(text="🔑 VLESS ключи", callback_data=f"menu:vless_keys:{conn.id}")
         kb.button(text="Удалить", callback_data=f"menu:disable:{conn.id}", icon_custom_emoji_id=PE_ID["delete"])
-    if pending_bonus_days:
-        kb.button(text=f"🎁 Добавить {pending_bonus_days} реф. дн.", callback_data=f"refbonus:apply:{conn.id}")
     kb.button(text="⬅️ К списку", callback_data="menu:connections")
     kb.adjust(1)
     return kb.as_markup()
@@ -127,21 +123,13 @@ def create_region_keyboard() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-PLAN_PERIOD_LABELS = {30: "1 месяц", 60: "2 месяца", 90: "3 месяца"}
-
-
-def plan_period_label(period_days: int) -> str:
-    return PLAN_PERIOD_LABELS.get(period_days, f"{period_days} дн.")
-
-
-def plans_keyboard(show_trial: bool = False) -> InlineKeyboardMarkup:
+def create_confirm_keyboard(show_trial: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     if show_trial:
-        kb.button(text=f"🎁 Пробный период ({settings.TRIAL_DAYS} дня, бесплатно)", callback_data="buy:trial")
-    for idx, plan in enumerate(settings.plans):
-        kb.button(text=f"{plan_period_label(plan.period_days)} — {plan.price_rub} руб.", callback_data=f"buy:plan:{idx}")
+        kb.button(text=f"🎁 Пробный период ({settings.TRIAL_DAYS} дня, бесплатно)", callback_data="create:trial")
+    kb.button(text="✅ Создать подключение", callback_data="create:confirm")
     kb.button(text="📄 Политика / Условия", callback_data="buy:legal")
-    kb.button(text="⬅️ Назад", callback_data="menu:main")
+    kb.button(text="⬅️ Отмена", callback_data="menu:connections")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -151,24 +139,6 @@ def legal_docs_keyboard() -> InlineKeyboardMarkup:
     kb.button(text="🔒 Политика конфиденциальности", url=settings.PRIVACY_POLICY_URL)
     kb.button(text="📄 Условия использования", url=settings.TERMS_URL)
     kb.button(text="⬅️ Главное меню", callback_data="menu:main")
-    kb.adjust(1)
-    return kb.as_markup()
-
-
-def promo_prompt_keyboard() -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    kb.button(text="Ввести промокод", callback_data="buy:promo")
-    kb.button(text="Пропустить", callback_data="buy:skip_promo")
-    kb.adjust(1)
-    return kb.as_markup()
-
-
-def payment_methods_keyboard(can_pay_from_balance: bool) -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    if can_pay_from_balance:
-        kb.button(text="💰 Оплатить с баланса", callback_data="buy:pay:balance")
-    kb.button(text="✅ Оплатить (тестовый режим)", callback_data="buy:pay:manual")
-    kb.button(text="⬅️ Отмена", callback_data="menu:main")
     kb.adjust(1)
     return kb.as_markup()
 

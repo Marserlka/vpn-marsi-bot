@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime as dt
+
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -53,6 +55,29 @@ def _backfill_legacy_referral_bonuses(sync_conn, added_columns: set[tuple[str, s
         return
     sync_conn.exec_driver_sql(
         "UPDATE referral_bonuses SET connection_id = -1 WHERE connection_id IS NULL"
+    )
+
+
+def _backfill_next_charge_at(sync_conn, added_columns: set[tuple[str, str]]) -> None:
+    """New per-connection daily-billing cursor (2026-09-05 switch from
+    prepaid monthly plans to a PRICE_PER_DAY_RUB/day charge per connection
+    — see TZ and the Connection model docstring). `_add_missing_columns`
+    leaves it NULL on every pre-existing row; if this boot is the one that
+    added the column, seed active connections from whatever `expires_at`
+    they already had (so nobody who prepaid a period under the old model
+    loses that time to the new daily debit) instead of starting the daily
+    clock immediately for everyone. Connections created after this point
+    always get next_charge_at set explicitly at creation time, so this only
+    ever fires once, on the boot that runs the migration.
+    """
+    if ("subscriptions", "next_charge_at") not in added_columns:
+        return
+    sync_conn.execute(
+        text(
+            'UPDATE subscriptions SET next_charge_at = COALESCE("expires_at", :now) '
+            'WHERE status = \'active\' AND next_charge_at IS NULL'
+        ),
+        {"now": dt.datetime.utcnow()},
     )
 
 
@@ -137,3 +162,4 @@ async def init_db() -> None:
         await conn.run_sync(_backfill_connection_defaults)
         await conn.run_sync(_drop_subscriptions_user_unique)
         await conn.run_sync(lambda c: _backfill_legacy_referral_bonuses(c, added_columns))
+        await conn.run_sync(lambda c: _backfill_next_charge_at(c, added_columns))

@@ -24,12 +24,12 @@ async def enable_free_period(session: AsyncSession) -> None:
 
 
 async def disable_free_period(session: AsyncSession) -> dt.timedelta:
-    """Shifts every active connection's expires_at forward by exactly how
-    long the free period lasted, so nobody actually loses paid days for
-    time spent inside it (see TZ) — the scheduler skips expiring/reminding
-    anyone while free_period_enabled is set, so expires_at is untouched
-    until this runs. Returns the shifted duration (zero if it wasn't
-    running, e.g. a double-click)."""
+    """Shifts every active connection's next_charge_at forward by exactly
+    how long the free period lasted, so nobody actually gets billed for
+    time spent inside it (see TZ) — the scheduler's daily_billing() skips
+    everyone while free_period_enabled is set, so next_charge_at is
+    untouched until this runs. Returns the shifted duration (zero if it
+    wasn't running, e.g. a double-click)."""
     row = await get_settings(session)
     if not row.free_period_enabled or row.free_period_started_at is None:
         row.free_period_enabled = False
@@ -41,11 +41,11 @@ async def disable_free_period(session: AsyncSession) -> dt.timedelta:
 
     conns = (
         await session.execute(
-            select(Connection).where(Connection.status == "active", Connection.expires_at.is_not(None))
+            select(Connection).where(Connection.status == "active", Connection.next_charge_at.is_not(None))
         )
     ).scalars().all()
     for conn in conns:
-        conn.expires_at = conn.expires_at + duration
+        conn.next_charge_at = conn.next_charge_at + duration
 
     row.free_period_enabled = False
     row.free_period_started_at = None

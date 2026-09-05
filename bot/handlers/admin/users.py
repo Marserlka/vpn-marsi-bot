@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import BalanceTransaction, Connection, User
 from bot.keyboards.admin import back_to_admin, user_actions_keyboard
-from bot.services.subscriptions import deactivate, extend_connection, list_connections
+from bot.services.subscriptions import deactivate, grant_free_days, list_connections
 
 router = Router(name="admin_users")
 
@@ -46,7 +46,12 @@ async def _render_user_card(message: Message, session: AsyncSession, user: User)
         "",
     ]
     for conn in conns:
-        status = f"активно до {conn.expires_at.strftime('%d.%m.%Y')}" if conn.status == "active" and conn.expires_at else "неактивно"
+        if conn.status == "active" and conn.next_charge_at:
+            status = f"активно, след. списание {conn.next_charge_at.strftime('%d.%m.%Y')}"
+        elif conn.status == "active":
+            status = "активно"
+        else:
+            status = "неактивно"
         lines.append(f"• «{conn.name}» ({conn.protocol}) — {status}, id={conn.awg_public_key or '—'}")
     if not conns:
         lines.append("(нет подключений)")
@@ -71,11 +76,11 @@ async def extend_conn(callback: CallbackQuery, session: AsyncSession) -> None:
         await callback.answer("Подключение не найдено", show_alert=True)
         return
     try:
-        await extend_connection(session, conn, int(days_str))
+        await grant_free_days(session, conn, int(days_str))
     except Exception as exc:
         await callback.answer(f"Ошибка: {exc}", show_alert=True)
         raise
-    await callback.answer("Продлено", show_alert=True)
+    await callback.answer("Начислены бесплатные дни", show_alert=True)
     user = await session.get(User, conn.user_id)
     if user:
         await _render_user_card(callback.message, session, user)

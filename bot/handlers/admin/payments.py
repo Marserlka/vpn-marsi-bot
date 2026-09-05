@@ -13,7 +13,7 @@ router = Router(name="admin_payments")
 
 @router.callback_query(F.data.startswith("admin:confirm_payment:"))
 async def confirm_payment(callback: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
-    from bot.handlers.purchase import apply_paid_payment, deliver_config
+    from bot.handlers.purchase import apply_paid_payment
 
     payment_id = int(callback.data.split(":")[-1])
     payment = await session.get(Payment, payment_id)
@@ -26,17 +26,13 @@ async def confirm_payment(callback: CallbackQuery, session: AsyncSession, bot: B
 
     payment.status = "paid"
     payment.paid_at = dt.datetime.utcnow()
-    conn = await apply_paid_payment(session, bot, payment)
+    await apply_paid_payment(session, bot, payment)
 
     await callback.message.edit_text(callback.message.text + "\n\n✅ Подтверждено")
     await callback.answer("Платёж подтверждён")
 
     try:
-        if payment.purpose == "balance_topup":
-            await bot.send_message(payment.user_id, f"✅ Баланс пополнен на {payment.amount} руб.")
-        else:
-            await bot.send_message(payment.user_id, "✅ Оплата подтверждена! Подключение активировано.")
-            await deliver_config(bot, session, conn)
+        await bot.send_message(payment.user_id, f"✅ Баланс пополнен на {payment.amount} руб.")
     except Exception:
         pass
 

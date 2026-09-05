@@ -12,6 +12,7 @@ from bot.config import settings
 from bot.database.models import Payment, User
 from bot.keyboards.admin import payment_confirmation_keyboard
 from bot.keyboards.client import back_to_menu, balance_keyboard, waiting_confirmation_keyboard
+from bot.utils.emoji import pe
 
 logger = logging.getLogger("bot.balance")
 router = Router(name="balance")
@@ -25,10 +26,10 @@ class TopupStates(StatesGroup):
 async def show_balance(callback: CallbackQuery, session: AsyncSession) -> None:
     user = await session.get(User, callback.from_user.id)
     text = (
-        f"💰 Баланс: {user.balance} руб.\n\n"
-        "Баланс пополняется вручную и автоматически — за каждую оплату приглашённого "
-        "друга вам начисляется 30% от суммы его покупки (см. «🎁 Бонус за друга»). "
-        "Баланс можно потратить на оплату подписки."
+        f"{pe('price')} Баланс: {user.balance} руб.\n\n"
+        f"С баланса ежедневно списывается {settings.PRICE_PER_DAY_RUB} руб. за каждое активное "
+        "подключение. Пополняется вручную; за первого друга, который пополнит баланс по вашей "
+        f"ссылке, вы получаете {settings.REFERRAL_BONUS_RUB} руб. (см. «🎁 Бонус за друга»)."
     )
     await callback.message.edit_text(text, reply_markup=balance_keyboard())
     await callback.answer()

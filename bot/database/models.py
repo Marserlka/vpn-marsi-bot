@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Boolean, func
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Integer, String, Boolean, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -15,7 +15,11 @@ class User(Base):
 
     tg_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    balance: Mapped[int] = mapped_column(Integer, default=0)
+    # Float, not Integer, since 2026-09-05 — the per-day billing model bills
+    # fractional rubles (1.5/day/connection). SQLite doesn't enforce column
+    # affinity strictly enough to need a real ALTER for this: existing whole
+    # rubles keep reading back fine, new fractional writes store as REAL.
+    balance: Mapped[float] = mapped_column(Float, default=0.0)
     referrer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.tg_id"), nullable=True)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
     trial_used: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -27,7 +31,19 @@ class User(Base):
 class Connection(Base):
     """One VPN connection (peer/user on the server side). A user can have
     several of these at once (see TZ 3.5) — each is its own paid, named,
-    independently-managed VPN identity, not tied to the others."""
+    independently-managed VPN identity, not tied to the others.
+
+    Billing switched from prepaid periods to per-day debits on 2026-09-05
+    (see TZ) — `expires_at` is legacy (kept only so old rows aren't
+    destroyed, and as the seed value `next_charge_at` was backfilled from,
+    see db.py:_backfill_next_charge_at) and is no longer written to.
+    `next_charge_at` is the actual billing cursor: bot/scheduler/jobs.py's
+    daily_billing() charges PRICE_PER_DAY_RUB from the owner's balance for
+    every active connection whose next_charge_at has passed, then pushes it
+    a day forward (see bot/services/subscriptions.py:charge_connection_day).
+    reminder_3d_sent/reminder_1d_sent are likewise legacy — there's no more
+    fixed expiry to remind anyone about.
+    """
 
     __tablename__ = "subscriptions"  # kept for continuity with existing data/migrations
 
@@ -41,6 +57,7 @@ class Connection(Base):
     awg_config: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     protocol: Mapped[str] = mapped_column(String(16), default="amnezia")  # amnezia/wireguard/vless/ss
     expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    next_charge_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="inactive")  # inactive/active/expired
     reminder_3d_sent: Mapped[bool] = mapped_column(Boolean, default=False)
     reminder_1d_sent: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -95,12 +112,15 @@ class PromoActivation(Base):
 
 
 class ReferralBonus(Base):
-    """bonus_amount is always 0 as of 2026-09-05 — the cash referral payout
-    was removed in favor of bonus_days only (see TZ). Kept as a column
-    for historical rows from before that change, not written to anymore.
-    connection_id is NULL until the referrer picks which of their
-    connections the days go to (see bot/services/referrals.py); a bonus
-    with connection_id IS NULL is "pending"."""
+    """Reworked twice on 2026-09-05 (see TZ): first from a cash percentage
+    to a flat bonus_days-only payout, then — same day — back to cash, now a
+    flat bonus_amount (REFERRAL_BONUS_RUB), granted once per referred user
+    the first time they top up their balance (see
+    bot/services/referrals.py:grant_referral_bonus_if_first_topup). The
+    existence of a row for a given referred_id IS the dedup check, so
+    bonus_amount is never actually 0 going forward. bonus_days and
+    connection_id are both legacy from the brief days-based iteration —
+    always 0/NULL on new rows, kept only so old rows aren't destroyed."""
 
     __tablename__ = "referral_bonuses"
 
@@ -133,7 +153,7 @@ class BalanceTransaction(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.tg_id"))
-    delta: Mapped[int] = mapped_column(Integer)
-    reason: Mapped[str] = mapped_column(String(32))  # admin_topup / referral / purchase
+    delta: Mapped[float] = mapped_column(Float)
+    reason: Mapped[str] = mapped_column(String(32))  # admin_topup / referral / topup / daily_charge
     created_by_admin_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())

@@ -69,7 +69,7 @@ class MarzbanClient:
         resp.raise_for_status()
         return resp
 
-    async def create_user(self, username: str, expire_at: dt.datetime, protocol: str = "vless") -> dict:
+    async def create_user(self, username: str, expire_at: dt.datetime | None, protocol: str = "vless") -> dict:
         """protocol is "vless" (Reality over plain tcp) or "ss" (Shadowsocks).
 
         VLESS-Reality briefly used the xhttp transport (see TZ 3.4) but that
@@ -87,6 +87,12 @@ class MarzbanClient:
         be fast in software *without* hardware AES acceleration, so it's
         the wrong choice here. WireGuard/AmneziaWG aren't affected by this —
         their cipher is fixed to ChaCha20-Poly1305 by the protocol itself.
+
+        expire_at=None means unlimited (Marzban's own convention for
+        expire=0) — as of the 2026-09-05 switch to per-day balance billing
+        (see TZ), Marzban no longer auto-expires anyone; lifecycle is
+        entirely our own daily-billing job disabling/removing the user when
+        the owner's balance can't cover the next day.
         """
         if protocol == "ss":
             proxies = {"shadowsocks": {"method": "aes-256-gcm"}}
@@ -98,7 +104,7 @@ class MarzbanClient:
             "username": username,
             "proxies": proxies,
             "inbounds": inbounds,
-            "expire": int(expire_at.timestamp()),
+            "expire": int(expire_at.timestamp()) if expire_at else 0,
             "data_limit": 0,  # unlimited traffic — see class docstring re: no per-device limit here
             "status": "active",
         }

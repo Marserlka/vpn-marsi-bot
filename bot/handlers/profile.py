@@ -338,10 +338,11 @@ async def disable_do(callback: CallbackQuery, session: AsyncSession) -> None:
 
 def _confirm_keyboard(yes_data: str, no_data: str):
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.utils.emoji import PE_ID
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Да", callback_data=yes_data)
-    kb.button(text="⬅️ Отмена", callback_data=no_data)
+    kb.button(text="Да", callback_data=yes_data, icon_custom_emoji_id=PE_ID["active"])
+    kb.button(text="Отмена", callback_data=no_data, icon_custom_emoji_id=PE_ID["back"])
     kb.adjust(1)
     return kb.as_markup()
 

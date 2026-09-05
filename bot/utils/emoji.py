@@ -33,6 +33,11 @@ PE_ID: dict[str, str] = {
     "update_config": "5845943483382110702",
     "switch_protocol": "5843826335088120045",
     "delete": "5985493993100679671",
+    # Same real checkmark id as "news" (5328194414323980905) — reused here
+    # for a different semantic (connection status), not a duplicate mistake.
+    "active": "5328194414323980905",
+    "inactive": "5330500738747487365",
+    "back": "5875082500023258804",
 }
 
 _FALLBACK: dict[str, str] = {
@@ -49,6 +54,9 @@ _FALLBACK: dict[str, str] = {
     "update_config": "🔄",
     "switch_protocol": "💬",
     "delete": "🗑",
+    "active": "✅",
+    "inactive": "❌",
+    "back": "⬅️",
 }
 
 

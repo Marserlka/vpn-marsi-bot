@@ -43,7 +43,7 @@ def profile_keyboard() -> InlineKeyboardMarkup:
     )
     builder = InlineKeyboardBuilder.from_markup(kb)
     builder.button(text="Пополнить баланс", callback_data="balance:topup", icon_custom_emoji_id=PE_ID["price"])
-    builder.button(text="⬅️ Главное меню", callback_data="menu:main")
+    builder.button(text="Главное меню", callback_data="menu:main", icon_custom_emoji_id=PE_ID["back"])
     builder.adjust(1, 1, 1, 1)
     return builder.as_markup()
 
@@ -51,10 +51,10 @@ def profile_keyboard() -> InlineKeyboardMarkup:
 def connections_list_keyboard(connections: list) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for conn in connections:
-        icon = "✅" if conn.status == "active" else "❌"
-        kb.button(text=f"{icon} {conn.name}", callback_data=f"menu:connection:{conn.id}")
+        icon_id = PE_ID["active"] if conn.status == "active" else PE_ID["inactive"]
+        kb.button(text=conn.name, callback_data=f"menu:connection:{conn.id}", icon_custom_emoji_id=icon_id)
     kb.button(text="Создать подключение", callback_data="create:start", icon_custom_emoji_id=PE_ID["add_connection"])
-    kb.button(text="⬅️ Главное меню", callback_data="menu:main")
+    kb.button(text="Главное меню", callback_data="menu:main", icon_custom_emoji_id=PE_ID["back"])
     kb.adjust(1)
     return kb.as_markup()
 
@@ -76,7 +76,7 @@ def connection_card_keyboard(conn) -> InlineKeyboardMarkup:
         if conn.protocol in ("vless", "ss"):
             kb.button(text="🔑 VLESS ключи", callback_data=f"menu:vless_keys:{conn.id}")
         kb.button(text="Удалить", callback_data=f"menu:disable:{conn.id}", icon_custom_emoji_id=PE_ID["delete"])
-    kb.button(text="⬅️ К списку", callback_data="menu:connections")
+    kb.button(text="К списку", callback_data="menu:connections", icon_custom_emoji_id=PE_ID["back"])
     kb.adjust(1)
     return kb.as_markup()
 
@@ -87,7 +87,7 @@ def protocol_switch_keyboard(conn) -> InlineKeyboardMarkup:
         if proto == conn.protocol:
             continue
         kb.button(text=label, callback_data=f"menu:switch_do:{conn.id}:{proto}")
-    kb.button(text="⬅️ Назад", callback_data=f"menu:connection:{conn.id}")
+    kb.button(text="Назад", callback_data=f"menu:connection:{conn.id}", icon_custom_emoji_id=PE_ID["back"])
     kb.adjust(1)
     return kb.as_markup()
 
@@ -95,14 +95,14 @@ def protocol_switch_keyboard(conn) -> InlineKeyboardMarkup:
 def balance_keyboard() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="Пополнить", callback_data="balance:topup", icon_custom_emoji_id=PE_ID["price"])
-    kb.button(text="⬅️ Главное меню", callback_data="menu:main")
+    kb.button(text="Главное меню", callback_data="menu:main", icon_custom_emoji_id=PE_ID["back"])
     kb.adjust(1)
     return kb.as_markup()
 
 
 def back_to_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="⬅️ Главное меню", callback_data="menu:main")
+    kb.button(text="Главное меню", callback_data="menu:main", icon_custom_emoji_id=PE_ID["back"])
     return kb.as_markup()
 
 
@@ -110,7 +110,7 @@ def create_protocol_keyboard() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for proto, label in PROTOCOL_CHOICES.items():
         kb.button(text=label, callback_data=f"create:protocol:{proto}")
-    kb.button(text="⬅️ Отмена", callback_data="menu:connections")
+    kb.button(text="Отмена", callback_data="menu:connections", icon_custom_emoji_id=PE_ID["back"])
     kb.adjust(1)
     return kb.as_markup()
 
@@ -119,7 +119,7 @@ def create_region_keyboard() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for region, label in REGION_CHOICES.items():
         kb.button(text=label, callback_data=f"create:region:{region}")
-    kb.button(text="⬅️ Отмена", callback_data="menu:connections")
+    kb.button(text="Отмена", callback_data="menu:connections", icon_custom_emoji_id=PE_ID["back"])
     kb.adjust(1)
     return kb.as_markup()
 
@@ -130,7 +130,7 @@ def create_confirm_keyboard(show_trial: bool = False) -> InlineKeyboardMarkup:
         kb.button(text=f"🎁 Пробный период ({settings.TRIAL_DAYS} дня, бесплатно)", callback_data="create:trial")
     kb.button(text="Создать подключение", callback_data="create:confirm", icon_custom_emoji_id=PE_ID["add_connection"])
     kb.button(text="Политика / Условия", callback_data="buy:legal", icon_custom_emoji_id=PE_ID["legal"])
-    kb.button(text="⬅️ Отмена", callback_data="menu:connections")
+    kb.button(text="Отмена", callback_data="menu:connections", icon_custom_emoji_id=PE_ID["back"])
     kb.adjust(1)
     return kb.as_markup()
 
@@ -139,19 +139,19 @@ def legal_docs_keyboard() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="Политика конфиденциальности", url=settings.PRIVACY_POLICY_URL, icon_custom_emoji_id=PE_ID["legal"])
     kb.button(text="Условия использования", url=settings.TERMS_URL, icon_custom_emoji_id=PE_ID["legal"])
-    kb.button(text="⬅️ Главное меню", callback_data="menu:main")
+    kb.button(text="Главное меню", callback_data="menu:main", icon_custom_emoji_id=PE_ID["back"])
     kb.adjust(1)
     return kb.as_markup()
 
 
 def waiting_confirmation_keyboard() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="Я оплатил(а)", callback_data="buy:confirm_paid")
+    kb.button(text="Я оплатил(а)", callback_data="buy:confirm_paid", icon_custom_emoji_id=PE_ID["active"])
     kb.adjust(1)
     return kb.as_markup()
 
 
 def captcha_keyboard(referrer_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Я не бот", callback_data=f"start:verify:{referrer_id}")
+    kb.button(text="Я не бот", callback_data=f"start:verify:{referrer_id}", icon_custom_emoji_id=PE_ID["active"])
     return kb.as_markup()

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+from pathlib import Path
 
 from aiogram import Router, F, Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart, CommandObject
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, FSInputFile, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
@@ -15,6 +16,8 @@ from bot.services.referrals import register_referral
 from bot.services.settings import get_settings
 
 router = Router(name="start")
+
+WELCOME_IMAGE = Path(__file__).resolve().parent.parent / "assets" / "welcome.jpg"
 
 WELCOME_TEXT = (
     "Добро пожаловать в VPN MARSI!\n\n"
@@ -50,7 +53,11 @@ async def cmd_start(message: Message, command: CommandObject, session: AsyncSess
             return
 
     row = await get_settings(session)
-    await message.answer(WELCOME_TEXT, reply_markup=main_menu(row.force_sub_channel_url))
+    await message.answer_photo(
+        FSInputFile(WELCOME_IMAGE),
+        caption=WELCOME_TEXT,
+        reply_markup=main_menu(row.force_sub_channel_url),
+    )
 
 
 @router.callback_query(F.data.startswith("start:verify:"))

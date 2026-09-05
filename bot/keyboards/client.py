@@ -7,11 +7,13 @@ from bot.config import settings
 from bot.keyboards._helpers import do_ikb
 from bot.utils.emoji import PE_ID
 
+# WireGuard and Shadowsocks temporarily hidden from new-connection/protocol-
+# switch pickers (2026-09-05, admin request) — existing connections on
+# either protocol keep working as-is (profile.py's PROTOCOL_LABELS is a
+# separate dict and still has both), this only stops new ones being chosen.
 PROTOCOL_CHOICES = {
     "amnezia": "AmneziaWG (маскировка)",
-    "wireguard": "WireGuard (скорость)",
     "vless": "VLESS-Reality",
-    "ss": "Shadowsocks",
 }
 REGION_CHOICES = {"de": "🇩🇪 Германия"}
 

@@ -5,7 +5,7 @@ from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
-from bot.handlers.start import WELCOME_TEXT
+from bot.handlers.start import welcome_text
 from bot.keyboards.client import back_to_menu, legal_docs_keyboard, main_menu
 from bot.services.settings import get_settings
 from bot.utils.nav import render
@@ -16,7 +16,7 @@ router = Router(name="menu")
 @router.callback_query(F.data == "menu:main")
 async def to_main_menu(callback: CallbackQuery, session: AsyncSession) -> None:
     row = await get_settings(session)
-    await render(callback, WELCOME_TEXT, main_menu(row.force_sub_channel_url))
+    await render(callback, welcome_text(), main_menu(row.force_sub_channel_url))
     await callback.answer()
 
 

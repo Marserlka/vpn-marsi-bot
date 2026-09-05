@@ -28,6 +28,7 @@ PE_ID: dict[str, str] = {
     "instructions": "5456127028916961325",
     "connections": "5879585266426973039",
     "add_connection": "5260606811794351458",
+    "price": "5377746319601324795",
 }
 
 _FALLBACK: dict[str, str] = {
@@ -39,6 +40,7 @@ _FALLBACK: dict[str, str] = {
     "instructions": "💙",
     "connections": "🌐",
     "add_connection": "💙",
+    "price": "💰",
 }
 
 

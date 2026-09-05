@@ -14,16 +14,22 @@ from bot.database.models import User
 from bot.keyboards.client import captcha_keyboard, main_menu
 from bot.services.referrals import register_referral
 from bot.services.settings import get_settings
+from bot.utils.emoji import pe
 
 router = Router(name="start")
 
 WELCOME_IMAGE = Path(__file__).resolve().parent.parent / "assets" / "welcome.jpg"
 
-WELCOME_TEXT = (
-    "Добро пожаловать в VPN MARSI!\n\n"
-    "1 подписка = 1 устройство, 30 руб./месяц.\n"
-    "Внимание: при одновременном включении на двух устройствах доступ автоматически блокируется."
-)
+
+def welcome_text() -> str:
+    """A function, not a module-level constant, so the price can never go
+    stale again the way the old hardcoded "30 руб./месяц" did after tariffs
+    changed to 50/100/150 — always reads the current cheapest plan."""
+    cheapest = min(settings.plans, key=lambda p: p.price_rub)
+    return (
+        "Добро пожаловать в Marsi VPN!\n\n"
+        f"Стоимость подписки — от {cheapest.price_rub} {pe('price')} руб./месяц."
+    )
 
 CAPTCHA_TEXT = (
     "Добро пожаловать в VPN MARSI!\n\n"
@@ -55,7 +61,7 @@ async def cmd_start(message: Message, command: CommandObject, session: AsyncSess
     row = await get_settings(session)
     await message.answer_photo(
         FSInputFile(WELCOME_IMAGE),
-        caption=WELCOME_TEXT,
+        caption=welcome_text(),
         reply_markup=main_menu(row.force_sub_channel_url),
     )
 
@@ -74,7 +80,7 @@ async def verify_captcha(callback: CallbackQuery, session: AsyncSession) -> None
         await register_referral(session, user, referrer_id)
 
     row = await get_settings(session)
-    await callback.message.edit_text(WELCOME_TEXT, reply_markup=main_menu(row.force_sub_channel_url))
+    await callback.message.edit_text(welcome_text(), reply_markup=main_menu(row.force_sub_channel_url))
     await callback.answer("Спасибо!")
 
 
@@ -82,7 +88,7 @@ async def verify_captcha(callback: CallbackQuery, session: AsyncSession) -> None
 async def check_force_sub(callback: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
     row = await get_settings(session)
     if not row.force_sub_enabled or not row.force_sub_channel_id:
-        await callback.message.answer(WELCOME_TEXT, reply_markup=main_menu(row.force_sub_channel_url))
+        await callback.message.answer(welcome_text(), reply_markup=main_menu(row.force_sub_channel_url))
         await callback.answer()
         return
 
@@ -96,5 +102,5 @@ async def check_force_sub(callback: CallbackQuery, session: AsyncSession, bot: B
         await callback.answer("Не вижу вашей подписки. Подпишитесь и попробуйте снова.", show_alert=True)
         return
 
-    await callback.message.answer(WELCOME_TEXT, reply_markup=main_menu(row.force_sub_channel_url))
+    await callback.message.answer(welcome_text(), reply_markup=main_menu(row.force_sub_channel_url))
     await callback.answer("Спасибо! Доступ открыт.")

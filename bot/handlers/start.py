@@ -28,7 +28,7 @@ def welcome_text() -> str:
     cheapest = min(settings.plans, key=lambda p: p.price_rub)
     return (
         "Добро пожаловать в Marsi VPN!\n\n"
-        f"Стоимость подписки — от {cheapest.price_rub} {pe('price')} руб./месяц."
+        f"Стоимость подписки — от {cheapest.price_rub}{pe('price')} руб./месяц."
     )
 
 CAPTCHA_TEXT = (

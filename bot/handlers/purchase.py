@@ -29,7 +29,7 @@ class CreateStates(StatesGroup):
     waiting_name = State()
 
 
-# --- new connection wizard: name -> protocol -> [region] -> confirm/trial --
+# --- new connection wizard: name -> protocol -> [region] -> confirm -------
 
 @router.callback_query(F.data == "create:start")
 async def create_start(callback: CallbackQuery, state: FSMContext) -> None:
@@ -80,7 +80,6 @@ async def create_region_chosen(callback: CallbackQuery, state: FSMContext, sessi
 async def _show_create_confirm(callback: CallbackQuery, state: FSMContext, session: AsyncSession, region: str) -> None:
     await state.update_data(region=region)
     user = await session.get(User, callback.from_user.id)
-    show_trial = bool(user and not user.trial_used)
 
     text = (
         f"{pe('price')} Стоимость: {settings.PRICE_PER_DAY_RUB} руб./день, списывается с баланса ежедневно.\n"
@@ -90,9 +89,7 @@ async def _show_create_confirm(callback: CallbackQuery, state: FSMContext, sessi
         "1️⃣ Политику конфиденциальности\n"
         "2️⃣ Условия использования"
     )
-    if show_trial:
-        text += f"\n\n🎁 Для вас как для нового пользователя доступен {settings.TRIAL_DAYS}-дневный бесплатный период."
-    await callback.message.edit_text(text, reply_markup=create_confirm_keyboard(show_trial))
+    await callback.message.edit_text(text, reply_markup=create_confirm_keyboard())
 
 
 @router.callback_query(F.data == "buy:legal")
@@ -100,32 +97,6 @@ async def show_legal(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
         "📄 Правовые документы сервиса:", reply_markup=legal_docs_keyboard()
     )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "create:trial")
-async def trial_chosen(callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot: Bot) -> None:
-    user = await session.get(User, callback.from_user.id)
-    if user is None or user.trial_used:
-        await callback.answer("Пробный период уже использован.", show_alert=True)
-        return
-
-    data = await state.get_data()
-    user.trial_used = True
-    conn = await create_connection(
-        session,
-        callback.from_user.id,
-        data.get("name", "Подключение"),
-        data.get("protocol", "amnezia"),
-        data.get("region", "de"),
-        trial=True,
-    )
-    await state.clear()
-
-    await callback.message.edit_text(
-        f"🎁 Пробный период на {settings.TRIAL_DAYS} дня активирован! Подключение создано."
-    )
-    await deliver_config(bot, session, conn)
     await callback.answer()
 
 
@@ -147,7 +118,6 @@ async def create_confirm(callback: CallbackQuery, state: FSMContext, session: As
         data.get("name", "Подключение"),
         data.get("protocol", "amnezia"),
         data.get("region", "de"),
-        trial=False,
     )
     await charge_connection_day(session, conn)
     await state.clear()

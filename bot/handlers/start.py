@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery, FSInputFile, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
-from bot.database.models import User
+from bot.database.models import BalanceTransaction, User
 from bot.keyboards.client import captcha_keyboard, main_menu
 from bot.services.referrals import register_referral
 from bot.services.settings import get_settings
@@ -43,9 +43,10 @@ async def cmd_start(message: Message, command: CommandObject, session: AsyncSess
     user = await session.get(User, message.from_user.id)
     is_new = user is None
     if user is None:
-        user = User(tg_id=message.from_user.id, username=message.from_user.username)
+        user = User(tg_id=message.from_user.id, username=message.from_user.username, balance=settings.WELCOME_BONUS_RUB)
         session.add(user)
         await session.flush()
+        session.add(BalanceTransaction(user_id=user.tg_id, delta=settings.WELCOME_BONUS_RUB, reason="welcome_bonus"))
     elif user.username != message.from_user.username:
         user.username = message.from_user.username
 
@@ -59,9 +60,12 @@ async def cmd_start(message: Message, command: CommandObject, session: AsyncSess
             return
 
     row = await get_settings(session)
+    caption = welcome_text()
+    if is_new:
+        caption += f"\n\n🎁 Дарим {settings.WELCOME_BONUS_RUB} руб. на баланс за регистрацию!"
     await message.answer_photo(
         FSInputFile(WELCOME_IMAGE),
-        caption=welcome_text(),
+        caption=caption,
         reply_markup=main_menu(row.force_sub_channel_url),
     )
 

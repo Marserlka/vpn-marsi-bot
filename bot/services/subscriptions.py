@@ -67,18 +67,15 @@ async def get_connection(session: AsyncSession, connection_id: int, user_id: int
 
 
 async def create_connection(
-    session: AsyncSession, user_id: int, name: str, protocol: str, region: str, *, trial: bool = False
+    session: AsyncSession, user_id: int, name: str, protocol: str, region: str
 ) -> Connection:
     """Provision a brand-new connection. Always makes a new peer/user —
     there's no "existing one to extend" here, this is called once per new
     connection. Doesn't touch the owner's balance — the caller is
-    responsible for that (see charge_connection_day and the trial branch in
-    bot/handlers/purchase.py, which sets User.trial_used itself).
-
-    `trial=True` gives the connection TRIAL_DAYS before the first daily
-    charge is due instead of billing starting immediately; the one-time-only
-    rule lives on User.trial_used, checked by the caller, not here.
-    """
+    responsible for that (see charge_connection_day). Billing starts
+    immediately (next_charge_at=now) — the old 3-day free trial was
+    replaced by a flat one-time balance bonus at registration (2026-09-05,
+    see bot/handlers/start.py and TZ)."""
     now = dt.datetime.utcnow()
     identity, config = await _provision(user_id, protocol)
 
@@ -91,7 +88,7 @@ async def create_connection(
         awg_config=config,
         status="active",
         expires_at=None,
-        next_charge_at=now + dt.timedelta(days=settings.TRIAL_DAYS) if trial else now,
+        next_charge_at=now,
     )
     session.add(conn)
     await session.flush()

@@ -33,11 +33,11 @@ class Settings(BaseSettings):
     # time disables the connection immediately (no grace period).
     PRICE_PER_DAY_RUB: float = 1.5
 
-    # One-time-only free trial (see bot/services/subscriptions.py
-    # create_connection(trial=True)) — gated by User.trial_used so it can't
-    # be repeated by the same account. A trial connection accrues no daily
-    # charge for its first TRIAL_DAYS days, then bills normally.
-    TRIAL_DAYS: int = 3
+    # One-time welcome bonus, credited straight to a new user's balance at
+    # /start (see bot/handlers/start.py) — replaced the old 3-day free-trial
+    # connection (2026-09-05, see TZ): simpler, and works the same for
+    # someone who never even creates a connection.
+    WELCOME_BONUS_RUB: float = 5
 
     # A connection younger than this can't be deleted by its owner (see
     # bot/handlers/profile.py disable_confirm/disable_do) — disclosed to the

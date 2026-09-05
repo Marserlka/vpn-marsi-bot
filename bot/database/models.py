@@ -22,6 +22,10 @@ class User(Base):
     balance: Mapped[float] = mapped_column(Float, default=0.0)
     referrer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.tg_id"), nullable=True)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Legacy — the 3-day free-trial connection this gated was replaced by a
+    # flat WELCOME_BONUS_RUB balance credit at registration (2026-09-05, see
+    # bot/handlers/start.py and TZ). Column kept so old rows aren't destroyed;
+    # nothing reads or writes it anymore.
     trial_used: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
 

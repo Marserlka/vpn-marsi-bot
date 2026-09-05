@@ -123,10 +123,8 @@ def create_region_keyboard() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def create_confirm_keyboard(show_trial: bool = False) -> InlineKeyboardMarkup:
+def create_confirm_keyboard() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    if show_trial:
-        kb.button(text=f"🎁 Пробный период ({settings.TRIAL_DAYS} дня, бесплатно)", callback_data="create:trial")
     kb.button(text="Создать подключение", callback_data="create:confirm", icon_custom_emoji_id=PE_ID["add_connection"])
     kb.button(text="Политика / Условия", callback_data="buy:legal", icon_custom_emoji_id=PE_ID["legal"])
     kb.button(text="Отмена", callback_data="menu:connections", icon_custom_emoji_id=PE_ID["back"])

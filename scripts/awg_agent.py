@@ -79,19 +79,17 @@ KEY_FILE = os.environ["AWG_TLS_KEYFILE"]
 # accepts: MTU, PresharedKey (set per-peer below), Jc/Jmin/Jmax/S1/S2, and
 # single-value H1-H4.
 #
-# MTU raised 1280->1420 on 2026-09-05 (matches the official container's own
-# default): measured ~21% lower CPU per Gbit/s in an iperf3 comparison,
-# since AmneziaWG's per-packet header-substitution overhead is amortized
-# over more payload per packet. 1420 is close to the practical ceiling —
-# standard internet paths cap at 1500 bytes and WireGuard's own encapsulation
-# (~60 bytes: outer IP+UDP+WG header+Poly1305 tag) eats most of the rest, so
-# going higher risks outer-packet IP fragmentation. Real risk on THIS value:
-# mobile carriers often have their own tunneling (GTP etc.) that lowers the
-# effective path MTU below 1420, which would blackhole large packets rather
-# than fragment them cleanly — watch for "connects but hangs on big transfers"
-# reports and drop back toward 1280 (or an intermediate value) if that shows up.
+# MTU 1420 was tried on 2026-09-05 (matches the official container's own
+# default, ~21% lower CPU per Gbit/s in an iperf3 comparison) but reverted
+# back to 1280 the same day: confirmed in real use on this user's network —
+# Telegram (small packets) kept working but YouTube and other sites serving
+# large responses failed outright ("Ошибка. Повторите попытку позже."),
+# the exact fragmentation/blackhole signature warned about below. Don't
+# re-raise this without confirming the real path MTU first (e.g. `ping -M do
+# -s <size>` from the client network), since the failure mode is silent data
+# loss on big transfers, not a clean error.
 AMNEZIA_CLIENT_PARAMS = (
-    "MTU = 1420\n"
+    "MTU = 1280\n"
     "Jc = 9\nJmin = 30\nJmax = 90\nS1 = 110\nS2 = 120\n"
     "H1 = 5000000\nH2 = 10000001\nH3 = 20000001\nH4 = 30000001\n"
 )

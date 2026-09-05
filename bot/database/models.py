@@ -18,6 +18,7 @@ class User(Base):
     balance: Mapped[int] = mapped_column(Integer, default=0)
     referrer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.tg_id"), nullable=True)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
+    trial_used: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
 
     connections: Mapped[list["Connection"]] = relationship(back_populates="user")
@@ -94,6 +95,13 @@ class PromoActivation(Base):
 
 
 class ReferralBonus(Base):
+    """bonus_amount is always 0 as of 2026-09-05 — the cash referral payout
+    was removed in favor of bonus_days only (see TZ). Kept as a column
+    for historical rows from before that change, not written to anymore.
+    connection_id is NULL until the referrer picks which of their
+    connections the days go to (see bot/services/referrals.py); a bonus
+    with connection_id IS NULL is "pending"."""
+
     __tablename__ = "referral_bonuses"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -101,13 +109,14 @@ class ReferralBonus(Base):
     referred_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.tg_id"))
     bonus_days: Mapped[int] = mapped_column(Integer, default=0)
     bonus_amount: Mapped[int] = mapped_column(Integer, default=0)
+    connection_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("subscriptions.id"), nullable=True)
     granted_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class BotSettings(Base):
     """Singleton row (id=1) of runtime settings the admin can change from
-    inside the bot itself, without a redeploy — currently just the
-    mandatory-channel-subscription gate."""
+    inside the bot itself, without a redeploy — mandatory-channel-subscription
+    gate, and the site-wide free period (see bot/services/free_period.py)."""
 
     __tablename__ = "bot_settings"
 
@@ -115,6 +124,8 @@ class BotSettings(Base):
     force_sub_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     force_sub_channel_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     force_sub_channel_url: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    free_period_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    free_period_started_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class BalanceTransaction(Base):

@@ -18,13 +18,14 @@ from bot.keyboards.client import (
     create_region_keyboard,
     legal_docs_keyboard,
     payment_methods_keyboard,
+    plan_period_label,
     plans_keyboard,
     promo_prompt_keyboard,
     waiting_confirmation_keyboard,
 )
 from bot.services.payments import DEFAULT_PROVIDER, PROVIDERS
 from bot.services.promocodes import PromoError, activate_promo, apply_discount, get_valid_promo
-from bot.services.subscriptions import get_connection
+from bot.services.subscriptions import create_connection, get_connection
 
 logger = logging.getLogger("bot.purchase")
 router = Router(name="purchase")
@@ -79,10 +80,12 @@ async def create_protocol_chosen(callback: CallbackQuery, state: FSMContext) -> 
 
 
 @router.callback_query(F.data.startswith("create:region:"))
-async def create_region_chosen(callback: CallbackQuery, state: FSMContext) -> None:
+async def create_region_chosen(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     region = callback.data.split(":")[-1]
     await state.update_data(region=region)
-    await callback.message.edit_text(PLANS_TEXT, reply_markup=plans_keyboard())
+    user = await session.get(User, callback.from_user.id)
+    show_trial = bool(user and not user.trial_used)
+    await callback.message.edit_text(PLANS_TEXT, reply_markup=plans_keyboard(show_trial))
     await callback.answer()
 
 
@@ -117,9 +120,39 @@ async def plan_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     plan = settings.plans[idx]
     await state.update_data(plan_idx=idx, price=plan.price_rub)
     await callback.message.edit_text(
-        f"Тариф: {plan.period_days} дн. — {plan.price_rub} руб.\n\nЕсть промокод?",
+        f"Тариф: {plan_period_label(plan.period_days)} — {plan.price_rub} руб.\n\nЕсть промокод?",
         reply_markup=promo_prompt_keyboard(),
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "buy:trial")
+async def trial_chosen(callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot: Bot) -> None:
+    data = await state.get_data()
+    if data.get("mode") != "new":
+        await callback.answer("Пробный период доступен только для нового подключения.", show_alert=True)
+        return
+
+    user = await session.get(User, callback.from_user.id)
+    if user is None or user.trial_used:
+        await callback.answer("Пробный период уже использован.", show_alert=True)
+        return
+
+    user.trial_used = True
+    conn = await create_connection(
+        session,
+        callback.from_user.id,
+        data.get("name", "Подключение"),
+        data.get("protocol", "amnezia"),
+        "de",
+        settings.TRIAL_DAYS,
+    )
+    await state.clear()
+
+    await callback.message.edit_text(
+        f"🎁 Пробный период на {settings.TRIAL_DAYS} дня активирован! Подключение создано."
+    )
+    await deliver_config(bot, session, conn)
     await callback.answer()
 
 
@@ -205,7 +238,7 @@ async def pay_with_balance(callback: CallbackQuery, state: FSMContext, session: 
     session.add(payment)
     await session.flush()
 
-    conn = await apply_paid_payment(session, payment)
+    conn = await apply_paid_payment(session, bot, payment)
     await state.clear()
 
     await callback.message.edit_text("✅ Оплачено с баланса! Подключение активировано.")
@@ -274,7 +307,7 @@ async def deliver_config(bot: Bot, session: AsyncSession, conn) -> None:
     await send_connection_config(bot, conn.user_id, conn)
 
 
-async def apply_paid_payment(session: AsyncSession, payment: Payment):
+async def apply_paid_payment(session: AsyncSession, bot: Bot, payment: Payment):
     """Shared by the admin confirmation handler and balance-payment flow.
 
     Returns the affected Connection (or None for a balance top-up).
@@ -316,5 +349,5 @@ async def apply_paid_payment(session: AsyncSession, payment: Payment):
         except PromoError:
             pass  # already consumed or expired between creation and confirmation; ignore
 
-    await grant_bonus_for_payment(session, user, payment)
+    await grant_bonus_for_payment(session, bot, user, payment)
     return conn

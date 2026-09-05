@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from bot.database.db import async_session_maker
 from bot.database.models import Connection
+from bot.services.free_period import is_free_period_active
 from bot.services.subscriptions import deactivate
 
 logger = logging.getLogger("bot.scheduler")
@@ -21,6 +22,8 @@ REMINDER_TEXT = {
 
 async def send_reminders(bot: Bot) -> None:
     async with async_session_maker() as session:
+        if await is_free_period_active(session):
+            return
         now = dt.datetime.utcnow()
         conns = (
             await session.execute(select(Connection).where(Connection.status == "active"))
@@ -43,6 +46,8 @@ async def send_reminders(bot: Bot) -> None:
 
 async def expire_sweep(bot: Bot) -> None:
     async with async_session_maker() as session:
+        if await is_free_period_active(session):
+            return
         now = dt.datetime.utcnow()
         conns = (
             await session.execute(

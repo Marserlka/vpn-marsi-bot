@@ -14,7 +14,7 @@ class IsAdmin(Filter):
 
 
 def build_admin_router() -> Router:
-    from bot.handlers.admin import broadcast, force_sub, payments, promocodes, stats, users
+    from bot.handlers.admin import broadcast, force_sub, free_period, payments, promocodes, stats, users
 
     router = Router(name="admin")
     router.message.filter(IsAdmin())
@@ -26,4 +26,5 @@ def build_admin_router() -> Router:
     router.include_router(promocodes.router)
     router.include_router(broadcast.router)
     router.include_router(force_sub.router)
+    router.include_router(free_period.router)
     return router

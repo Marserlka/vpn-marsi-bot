@@ -10,13 +10,20 @@ engine = create_async_engine(settings.DB_URL, echo=False)
 async_session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
-def _add_missing_columns(sync_conn) -> None:
+def _add_missing_columns(sync_conn) -> set[tuple[str, str]]:
     """SQLAlchemy's create_all() only creates missing tables, not missing
     columns on tables that already exist. Since we don't run Alembic
     migrations, patch existing SQLite tables in place so new model fields
     (e.g. Subscription.awg_public_key/awg_config, added when AmneziaWG
     became the primary protocol) show up on an already-deployed DB.
+
+    Returns the (table, column) pairs actually added *this run*, so a
+    one-off backfill (see _backfill_legacy_referral_bonuses) can tell "just
+    added, still empty" apart from "existed already, may have real data" —
+    this function itself runs on every boot, so it can't assume "column is
+    empty" means "column is new".
     """
+    added: set[tuple[str, str]] = set()
     inspector = inspect(sync_conn)
     for table in Base.metadata.tables.values():
         if table.name not in inspector.get_table_names():
@@ -27,6 +34,26 @@ def _add_missing_columns(sync_conn) -> None:
                 continue
             col_type = column.type.compile(sync_conn.dialect)
             sync_conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {col_type}'))
+            added.add((table.name, column.name))
+    return added
+
+
+def _backfill_legacy_referral_bonuses(sync_conn, added_columns: set[tuple[str, str]]) -> None:
+    """referral_bonuses.connection_id NULL means "pending, referrer hasn't
+    picked a connection yet" (see the ReferralBonus model docstring and
+    bot/services/referrals.py) — but every row that existed *before* this
+    column was added would also read as NULL, which would let referrers
+    re-claim bonus days they already received under the old (auto-applied)
+    logic. Only when this boot is the one that actually added the column do
+    we stamp every pre-existing row with a non-NULL sentinel (-1, "legacy,
+    already settled, not claimable"); bonuses granted after that point go
+    through the normal pending flow untouched.
+    """
+    if ("referral_bonuses", "connection_id") not in added_columns:
+        return
+    sync_conn.exec_driver_sql(
+        "UPDATE referral_bonuses SET connection_id = -1 WHERE connection_id IS NULL"
+    )
 
 
 def _backfill_connection_defaults(sync_conn) -> None:
@@ -106,6 +133,7 @@ def _drop_subscriptions_user_unique(sync_conn) -> None:
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await conn.run_sync(_add_missing_columns)
+        added_columns = await conn.run_sync(_add_missing_columns)
         await conn.run_sync(_backfill_connection_defaults)
         await conn.run_sync(_drop_subscriptions_user_unique)
+        await conn.run_sync(lambda c: _backfill_legacy_referral_bonuses(c, added_columns))

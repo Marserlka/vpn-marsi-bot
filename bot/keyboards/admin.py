@@ -11,6 +11,7 @@ def admin_main_menu() -> InlineKeyboardMarkup:
     kb.button(text="🎟 Промокоды", callback_data="admin:promo")
     kb.button(text="📢 Рассылка", callback_data="admin:broadcast")
     kb.button(text="🔒 Обязательная подписка", callback_data="admin:force_sub")
+    kb.button(text="🎁 Бесплатный период", callback_data="admin:free_period")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -22,6 +23,17 @@ def force_sub_keyboard(enabled: bool) -> InlineKeyboardMarkup:
     else:
         kb.button(text="🟢 Включить", callback_data="admin:force_sub:enable")
     kb.button(text="✏️ Задать канал", callback_data="admin:force_sub:set")
+    kb.button(text="⬅️ Админ-меню", callback_data="admin:main")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def free_period_keyboard(enabled: bool) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    if enabled:
+        kb.button(text="🔴 Отключить", callback_data="admin:free_period:disable")
+    else:
+        kb.button(text="🟢 Включить", callback_data="admin:free_period:enable")
     kb.button(text="⬅️ Админ-меню", callback_data="admin:main")
     kb.adjust(1)
     return kb.as_markup()

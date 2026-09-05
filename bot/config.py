@@ -32,15 +32,21 @@ class Settings(BaseSettings):
     AWG_AGENT_BASE_URL: str = ""
     AWG_AGENT_TOKEN: str = ""
 
-    PLAN_1: str = "30:30"
-    PLAN_2: str = "90:90"
-    PLAN_3: str = "180:180"
+    PLAN_1: str = "30:50"
+    PLAN_2: str = "60:100"
+    PLAN_3: str = "90:150"
 
-    # Referral: recurring 30% of every purchase the referred user makes,
-    # plus a flat 3-day bonus, credited on EACH of their payments (not just
-    # the first). Guarded by an "I'm not a bot" captcha button in /start so
-    # ref-farming bots can't cheaply spam referral signups.
-    REFERRAL_BONUS_PERCENT: int = 30
+    # One-time-only free trial (see bot/services/subscriptions.py
+    # create_trial_connection) — gated by User.trial_used so it can't be
+    # repeated by the same account.
+    TRIAL_DAYS: int = 3
+
+    # Referral: as of 2026-09-05, no cash payout — a flat REFERRAL_BONUS_DAYS
+    # bonus, credited on EACH of the referred user's payments (not just the
+    # first), that the referrer picks which of their own connections to add
+    # to (see bot/services/referrals.py). Guarded by an "I'm not a bot"
+    # captcha button in /start so ref-farming bots can't cheaply spam
+    # referral signups.
     REFERRAL_BONUS_DAYS: int = 3
     REFERRAL_CAPTCHA_TIMEOUT_SECONDS: int = 120
 

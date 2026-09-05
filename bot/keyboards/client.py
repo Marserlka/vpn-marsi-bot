@@ -46,6 +46,14 @@ def profile_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def referral_bonus_keyboard(connections: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for conn in connections:
+        kb.button(text=conn.name, callback_data=f"refbonus:apply:{conn.id}")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 def connections_list_keyboard(connections: list) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for conn in connections:
@@ -57,7 +65,7 @@ def connections_list_keyboard(connections: list) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def connection_card_keyboard(conn) -> InlineKeyboardMarkup:
+def connection_card_keyboard(conn, pending_bonus_days: int = 0) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     if conn.status == "active":
         kb.button(text="📥 Получить конфиг", callback_data=f"menu:get_config:{conn.id}")
@@ -65,6 +73,8 @@ def connection_card_keyboard(conn) -> InlineKeyboardMarkup:
         kb.button(text="🔀 Сменить протокол", callback_data=f"menu:switch:{conn.id}")
         kb.button(text="⛔ Отключить", callback_data=f"menu:disable:{conn.id}")
     kb.button(text="➕ Продлить", callback_data=f"menu:extend:{conn.id}")
+    if pending_bonus_days:
+        kb.button(text=f"🎁 Добавить {pending_bonus_days} реф. дн.", callback_data=f"refbonus:apply:{conn.id}")
     kb.button(text="⬅️ К списку", callback_data="menu:connections")
     kb.adjust(1)
     return kb.as_markup()
@@ -113,10 +123,19 @@ def create_region_keyboard() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def plans_keyboard() -> InlineKeyboardMarkup:
+PLAN_PERIOD_LABELS = {30: "1 месяц", 60: "2 месяца", 90: "3 месяца"}
+
+
+def plan_period_label(period_days: int) -> str:
+    return PLAN_PERIOD_LABELS.get(period_days, f"{period_days} дн.")
+
+
+def plans_keyboard(show_trial: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    if show_trial:
+        kb.button(text=f"🎁 Пробный период ({settings.TRIAL_DAYS} дня, бесплатно)", callback_data="buy:trial")
     for idx, plan in enumerate(settings.plans):
-        kb.button(text=f"{plan.period_days} дн. — {plan.price_rub} руб.", callback_data=f"buy:plan:{idx}")
+        kb.button(text=f"{plan_period_label(plan.period_days)} — {plan.price_rub} руб.", callback_data=f"buy:plan:{idx}")
     kb.button(text="📄 Политика / Условия", callback_data="buy:legal")
     kb.button(text="⬅️ Назад", callback_data="menu:main")
     kb.adjust(1)

@@ -26,7 +26,7 @@ async def confirm_payment(callback: CallbackQuery, session: AsyncSession, bot: B
 
     payment.status = "paid"
     payment.paid_at = dt.datetime.utcnow()
-    conn = await apply_paid_payment(session, payment)
+    conn = await apply_paid_payment(session, bot, payment)
 
     await callback.message.edit_text(callback.message.text + "\n\n✅ Подтверждено")
     await callback.answer("Платёж подтверждён")

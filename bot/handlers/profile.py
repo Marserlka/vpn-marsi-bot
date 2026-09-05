@@ -16,9 +16,11 @@ from bot.keyboards.client import (
     connections_list_keyboard,
     profile_keyboard,
 )
+from bot.services.referrals import claim_pending_bonus_days, pending_bonus_days
 from bot.services.subscriptions import (
     MARZBAN_FAMILY,
     deactivate,
+    extend_connection,
     get_connection,
     list_connections,
     regenerate_connection,
@@ -107,11 +109,32 @@ async def connection_card(callback: CallbackQuery, session: AsyncSession) -> Non
     if not conn:
         await callback.answer("Подключение не найдено.", show_alert=True)
         return
+    pending_days = await pending_bonus_days(session, callback.from_user.id)
     await callback.message.edit_text(
         _connection_card_text(conn),
-        reply_markup=connection_card_keyboard(conn),
+        reply_markup=connection_card_keyboard(conn, pending_days),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("refbonus:apply:"))
+async def apply_referral_bonus(callback: CallbackQuery, session: AsyncSession) -> None:
+    conn_id = int(callback.data.split(":")[-1])
+    conn = await get_connection(session, conn_id, callback.from_user.id)
+    if not conn:
+        await callback.answer("Подключение не найдено.", show_alert=True)
+        return
+    days = await claim_pending_bonus_days(session, callback.from_user.id, conn_id)
+    if not days:
+        await callback.answer("Нет доступных бонусных дней.", show_alert=True)
+        return
+    conn = await extend_connection(session, conn, days)
+    pending_days = await pending_bonus_days(session, callback.from_user.id)
+    await callback.message.edit_text(
+        _connection_card_text(conn),
+        reply_markup=connection_card_keyboard(conn, pending_days),
+    )
+    await callback.answer(f"Начислено {days} дн.!")
 
 
 async def send_connection_config(bot, chat_id: int, conn: Connection) -> None:
@@ -273,16 +296,17 @@ async def referral(callback: CallbackQuery, session: AsyncSession) -> None:
     )
     bonuses = bonuses.scalars().all()
     total_days = sum(b.bonus_days for b in bonuses)
-    total_amount = sum(b.bonus_amount for b in bonuses)
+    pending_days = await pending_bonus_days(session, callback.from_user.id)
 
     text = (
         "🎁 Бонус за друга\n\n"
-        f"Получайте {settings.REFERRAL_BONUS_PERCENT}% с каждой покупки приглашённого друга "
-        f"+ {settings.REFERRAL_BONUS_DAYS} дня подписки на баланс — за каждую его оплату, не только за первую.\n\n"
+        f"Получайте {settings.REFERRAL_BONUS_DAYS} дня подписки за каждую оплату приглашённого "
+        "друга, не только за первую — сами выбираете, к какому подключению их добавить.\n\n"
         f"Ваша ссылка:\n{link}\n\n"
         f"Приглашено: {invited_count or 0}\n"
         f"Оплатили подписку: {paid_count or 0}\n"
-        f"Заработано: {total_amount} руб." + (f", {total_days} дн." if total_days else "")
+        f"Заработано всего: {total_days} дн."
+        + (f" (из них {pending_days} дн. ждут выбора подключения)" if pending_days else "")
     )
     await render(callback, text, back_to_menu())
     await callback.answer()

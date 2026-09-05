@@ -53,7 +53,12 @@ Optional:
   AWG_INTERFACE (default awg0)
   AWG_SUBNET (default 10.29.29.0/24)
   AWG_BIN (default /usr/bin/awg)
-  WG_CONF_DIR (default /etc/wireguard)
+  WG_CONF_DIR (default /opt/amnezia/wireguard — path *inside*
+                WG_DOCKER_CONTAINER when that's set, a plain host path
+                otherwise; see the PROTOCOLS["wireguard"] comment below)
+  WG_DOCKER_CONTAINER (default unset — same purpose as AWG_DOCKER_CONTAINER,
+                for the wireguard protocol's container)
+  WG_STATE_DIR (default /etc/wireguard — always a host path)
   WG_INTERFACE (default wg0)
   WG_SUBNET (default 10.29.31.0/24)
   WG_BIN (default /usr/bin/wg)
@@ -133,7 +138,17 @@ PROTOCOLS = {
         "rate_limit_mbit": int(os.environ.get("AWG_RATE_LIMIT_MBIT", "25")),
     },
     "wireguard": {
-        "dir": os.environ.get("WG_CONF_DIR", "/etc/wireguard"),
+        # As of 2026-09-05 this also runs inside the official AmneziaVPN
+        # Docker container (mirrors the amnezia protocol above and for the
+        # same reason): our host-native wg-quick@wg0 kept failing a real
+        # handshake's data path because net.ipv4.conf.wg0.src_valid_mark
+        # stayed 0 even after setting conf.all.src_valid_mark=1 — the
+        # per-interface value doesn't inherit from `all` after the fact, it
+        # needs `default` set *before* the interface is created. Docker's
+        # `--sysctl` is applied to the container's netns at creation time,
+        # before wg0 exists in it, so this ordering problem doesn't arise —
+        # same fix shape as the AmneziaWG postmortem.
+        "dir": os.environ.get("WG_CONF_DIR", "/opt/amnezia/wireguard"),
         "conf_name": "wg0.conf",
         "state_name": "peers.json",
         "interface": os.environ.get("WG_INTERFACE", "wg0"),
@@ -142,8 +157,8 @@ PROTOCOLS = {
         "endpoint": os.environ["WG_SERVER_ENDPOINT"],
         "server_public_key": os.environ["WG_SERVER_PUBLIC_KEY"],
         "client_params": "MTU = 1280\n",
-        "docker_container": "",
-        "state_dir": os.environ.get("WG_CONF_DIR", "/etc/wireguard"),
+        "docker_container": os.environ.get("WG_DOCKER_CONTAINER", ""),
+        "state_dir": os.environ.get("WG_STATE_DIR", "/etc/wireguard"),
         "rate_limit_mbit": 0,
     },
 }

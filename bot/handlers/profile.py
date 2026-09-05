@@ -24,6 +24,7 @@ from bot.services.subscriptions import (
     regenerate_connection,
     switch_protocol,
 )
+from bot.utils.emoji import pe
 
 router = Router(name="profile")
 
@@ -81,7 +82,7 @@ async def profile(callback: CallbackQuery, session: AsyncSession) -> None:
     active_count = sum(1 for c in conns if c.status == "active")
 
     text = (
-        f"🌐 Личный кабинет\n\n"
+        f"{pe('cabinet')} Личный кабинет\n\n"
         f"Баланс: {user.balance} руб.\n"
         f"Активных подключений: {active_count}\n\n"
         f"⚠️ Каждое подключение — 1 устройство."

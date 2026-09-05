@@ -2,17 +2,20 @@ from __future__ import annotations
 
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
 from bot.handlers.start import WELCOME_TEXT
 from bot.keyboards.client import back_to_menu, legal_docs_keyboard, main_menu
+from bot.services.settings import get_settings
 
 router = Router(name="menu")
 
 
 @router.callback_query(F.data == "menu:main")
-async def to_main_menu(callback: CallbackQuery) -> None:
-    await callback.message.edit_text(WELCOME_TEXT, reply_markup=main_menu())
+async def to_main_menu(callback: CallbackQuery, session: AsyncSession) -> None:
+    row = await get_settings(session)
+    await callback.message.edit_text(WELCOME_TEXT, reply_markup=main_menu(row.force_sub_channel_url))
     await callback.answer()
 
 

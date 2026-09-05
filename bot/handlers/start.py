@@ -49,7 +49,8 @@ async def cmd_start(message: Message, command: CommandObject, session: AsyncSess
             await message.answer(CAPTCHA_TEXT, reply_markup=captcha_keyboard(referrer_id))
             return
 
-    await message.answer(WELCOME_TEXT, reply_markup=main_menu())
+    row = await get_settings(session)
+    await message.answer(WELCOME_TEXT, reply_markup=main_menu(row.force_sub_channel_url))
 
 
 @router.callback_query(F.data.startswith("start:verify:"))
@@ -65,7 +66,8 @@ async def verify_captcha(callback: CallbackQuery, session: AsyncSession) -> None
     if user is not None:
         await register_referral(session, user, referrer_id)
 
-    await callback.message.edit_text(WELCOME_TEXT, reply_markup=main_menu())
+    row = await get_settings(session)
+    await callback.message.edit_text(WELCOME_TEXT, reply_markup=main_menu(row.force_sub_channel_url))
     await callback.answer("Спасибо!")
 
 
@@ -73,7 +75,7 @@ async def verify_captcha(callback: CallbackQuery, session: AsyncSession) -> None
 async def check_force_sub(callback: CallbackQuery, session: AsyncSession, bot: Bot) -> None:
     row = await get_settings(session)
     if not row.force_sub_enabled or not row.force_sub_channel_id:
-        await callback.message.answer(WELCOME_TEXT, reply_markup=main_menu())
+        await callback.message.answer(WELCOME_TEXT, reply_markup=main_menu(row.force_sub_channel_url))
         await callback.answer()
         return
 
@@ -87,5 +89,5 @@ async def check_force_sub(callback: CallbackQuery, session: AsyncSession, bot: B
         await callback.answer("Не вижу вашей подписки. Подпишитесь и попробуйте снова.", show_alert=True)
         return
 
-    await callback.message.answer(WELCOME_TEXT, reply_markup=main_menu())
+    await callback.message.answer(WELCOME_TEXT, reply_markup=main_menu(row.force_sub_channel_url))
     await callback.answer("Спасибо! Доступ открыт.")

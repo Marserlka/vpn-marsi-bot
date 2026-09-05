@@ -249,7 +249,7 @@ async def disable_confirm(callback: CallbackQuery, session: AsyncSession) -> Non
         await callback.answer("Подключение не найдено.", show_alert=True)
         return
     await callback.message.edit_text(
-        f"Отключить «{conn.name}»? Доступ прекратится сразу, деньги за оставшиеся дни не возвращаются.",
+        f"Удалить «{conn.name}»? Доступ прекратится сразу, деньги за оставшиеся дни не возвращаются.",
         reply_markup=_confirm_keyboard(f"menu:disable_do:{conn_id}", f"menu:connection:{conn_id}"),
     )
     await callback.answer()
@@ -263,7 +263,7 @@ async def disable_do(callback: CallbackQuery, session: AsyncSession) -> None:
         await callback.answer("Подключение не найдено.", show_alert=True)
         return
     await deactivate(session, conn)
-    await callback.answer("Отключено", show_alert=True)
+    await callback.answer("Удалено", show_alert=True)
     await callback.message.edit_text(_connection_card_text(conn), reply_markup=connection_card_keyboard(conn))
 
 

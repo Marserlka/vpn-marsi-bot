@@ -29,6 +29,10 @@ PE_ID: dict[str, str] = {
     "connections": "5879585266426973039",
     "add_connection": "5260606811794351458",
     "price": "5377746319601324795",
+    "get_config": "5899757765743615694",
+    "update_config": "5845943483382110702",
+    "switch_protocol": "5843826335088120045",
+    "delete": "5985493993100679671",
 }
 
 _FALLBACK: dict[str, str] = {
@@ -41,6 +45,10 @@ _FALLBACK: dict[str, str] = {
     "connections": "🌐",
     "add_connection": "💙",
     "price": "💰",
+    "get_config": "⬇️",
+    "update_config": "🔄",
+    "switch_protocol": "💬",
+    "delete": "🗑",
 }
 
 

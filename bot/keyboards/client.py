@@ -68,13 +68,15 @@ def connections_list_keyboard(connections: list) -> InlineKeyboardMarkup:
 
 
 def connection_card_keyboard(conn, pending_bonus_days: int = 0) -> InlineKeyboardMarkup:
+    # "Продлить" removed 2026-09-05 (admin is reworking how renewal works —
+    # see TZ) — disable/delete still uses the same menu:disable:* flow
+    # under the hood, just relabeled "Удалить" per the new icon set.
     kb = InlineKeyboardBuilder()
     if conn.status == "active":
-        kb.button(text="📥 Получить конфиг", callback_data=f"menu:get_config:{conn.id}")
-        kb.button(text="🔄 Обновить конфиг", callback_data=f"menu:regen:{conn.id}")
-        kb.button(text="🔀 Сменить протокол", callback_data=f"menu:switch:{conn.id}")
-        kb.button(text="⛔ Отключить", callback_data=f"menu:disable:{conn.id}")
-    kb.button(text="➕ Продлить", callback_data=f"menu:extend:{conn.id}")
+        kb.button(text="Получить конфиг", callback_data=f"menu:get_config:{conn.id}", icon_custom_emoji_id=PE_ID["get_config"])
+        kb.button(text="Обновить конфиг", callback_data=f"menu:regen:{conn.id}", icon_custom_emoji_id=PE_ID["update_config"])
+        kb.button(text="Сменить протокол", callback_data=f"menu:switch:{conn.id}", icon_custom_emoji_id=PE_ID["switch_protocol"])
+        kb.button(text="Удалить", callback_data=f"menu:disable:{conn.id}", icon_custom_emoji_id=PE_ID["delete"])
     if pending_bonus_days:
         kb.button(text=f"🎁 Добавить {pending_bonus_days} реф. дн.", callback_data=f"refbonus:apply:{conn.id}")
     kb.button(text="⬅️ К списку", callback_data="menu:connections")

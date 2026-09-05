@@ -28,7 +28,7 @@ def welcome_text() -> str:
     billing since 2026-09-05, see TZ)."""
     return (
         "Добро пожаловать в Marsi VPN!\n\n"
-        f"Стоимость — {settings.PRICE_PER_DAY_RUB}{pe('price')} руб./день за подключение."
+        f"Стоимость — {settings.PRICE_PER_DAY_RUB}{pe('price')}/день за подключение."
     )
 
 CAPTCHA_TEXT = (

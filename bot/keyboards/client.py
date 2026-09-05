@@ -67,6 +67,7 @@ def connection_card_keyboard(conn) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     if conn.status == "active":
         kb.button(text="Получить конфиг", callback_data=f"menu:get_config:{conn.id}", icon_custom_emoji_id=PE_ID["get_config"])
+        kb.button(text="📱 QR-код", callback_data=f"menu:qr:{conn.id}")
         kb.button(text="Обновить конфиг", callback_data=f"menu:regen:{conn.id}", icon_custom_emoji_id=PE_ID["update_config"])
         kb.button(text="Сменить протокол", callback_data=f"menu:switch:{conn.id}", icon_custom_emoji_id=PE_ID["switch_protocol"])
         # Subscription-URL delivery (2026-09-05) bundles multiple per-inbound

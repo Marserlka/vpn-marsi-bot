@@ -174,6 +174,34 @@ async def get_config(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("menu:qr:"))
+async def get_qr(callback: CallbackQuery, session: AsyncSession) -> None:
+    """QR of the same content «Получить конфиг» sends: the subscription URL
+    for VLESS/Shadowsocks, the raw wg-quick .conf text for AmneziaWG/
+    WireGuard — both AmneziaVPN and the official WireGuard app support
+    importing a config by scanning a QR code of exactly this content."""
+    conn_id = int(callback.data.split(":")[-1])
+    conn = await get_connection(session, conn_id, callback.from_user.id)
+    if not conn or not conn.awg_config or conn.status != "active":
+        await callback.answer("Нет активного конфига.", show_alert=True)
+        return
+
+    import io
+
+    import qrcode
+
+    img = qrcode.make(conn.awg_config)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    photo = BufferedInputFile(buf.getvalue(), filename=f"{conn.name}-qr.png")
+    await callback.bot.send_photo(
+        callback.message.chat.id,
+        photo,
+        caption=f"📱 QR-код «{conn.name}» — отсканируйте в приложении при добавлении конфигурации.",
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("menu:vless_keys:"))
 async def vless_keys(callback: CallbackQuery, session: AsyncSession) -> None:
     """Since 2026-09-05 «Получить конфиг» sends the Marzban subscription URL,

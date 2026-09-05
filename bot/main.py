@@ -33,7 +33,17 @@ async def main() -> None:
 
     dp.update.middleware(ErrorLoggingMiddleware())
     dp.update.middleware(DbSessionMiddleware())
-    dp.update.middleware(ForceSubscribeMiddleware())
+    # Registered on message/callback_query specifically, NOT dp.update — at
+    # the update level `event` is the raw Update object, which has no
+    # `.from_user` at all, so `getattr(event, "from_user", None)` always
+    # returned None and the whole check silently no-opped for every user
+    # (found 2026-09-05: force-sub showed "enabled" in the admin panel, bot
+    # was a channel admin, chat_id was correct, and it still never prompted
+    # anyone). Message/CallbackQuery genuinely have `.from_user`, matching
+    # the isinstance() checks already in the middleware's own body.
+    force_sub = ForceSubscribeMiddleware()
+    dp.message.middleware(force_sub)
+    dp.callback_query.middleware(force_sub)
 
     dp.include_router(start.router)
     dp.include_router(menu.router)

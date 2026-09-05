@@ -169,6 +169,25 @@ class OlcRtcLabConfig(Base):
     updated_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class CdnFrontingLabConfig(Base):
+    """Singleton row (id=1) for the admin-only /test lab — the Cloudflare
+    CDN-fronting whitelist-bypass approach (VLESS+WS+TLS behind a
+    Cloudflare-proxied domain, see TZ 2026-09-05). Same purpose as
+    OlcRtcLabConfig: a scratch spot for the admin's own setup data, not
+    wired into anything client-facing."""
+
+    __tablename__ = "cdn_fronting_lab_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    domain: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    cf_zone_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    cf_api_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    vless_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ws_path: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    updated_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class BalanceTransaction(Base):
     __tablename__ = "balance_transactions"
 

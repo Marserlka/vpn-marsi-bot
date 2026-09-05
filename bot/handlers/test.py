@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -9,7 +11,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.handlers.admin import IsAdmin
-from bot.services.testlab import get_olcrtc_config, set_olcrtc_config
+from bot.services.cdn_check import check_cdn_readiness
+from bot.services.testlab import get_cdn_config, get_olcrtc_config, set_cdn_config, set_olcrtc_config
 
 router = Router(name="test_lab")
 router.message.filter(IsAdmin())
@@ -38,13 +41,41 @@ OLCRTC_INSTALL_TEXT = (
 )
 
 
+CDN_SETUP_TEXT = (
+    "1. Купить домен (любой регистратор, лучше не .ru).\n"
+    "2. Добавить домен в Cloudflare, прописать у регистратора NS-сервера, которые покажет CF.\n"
+    "3. В CF создать A-запись на поддомен (например vpn.домен.com) → IP VPS, статус <b>Proxied</b> "
+    "(оранжевое облако).\n"
+    "4. SSL/TLS → режим <b>Full (strict)</b>.\n"
+    "5. My Profile → API Tokens → Create Token → Edit zone DNS (права только на этот домен) — "
+    "сюда сохранить сам токен и Zone ID со страницы обзора домена.\n\n"
+    "Когда DNS применится — проверка ниже покажет, что домен реально идёт через Cloudflare, "
+    "и можно будет ставить Xray-инбаунд (VLESS+WS+TLS) на VPS под этот домен."
+)
+
+
 class OlcRtcStates(StatesGroup):
+    waiting_config = State()
+
+
+class CdnStates(StatesGroup):
     waiting_config = State()
 
 
 def _lab_main_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(text="📡 OlcRTC (обход БС через Телемост)", callback_data="test:olcrtc")
+    kb.button(text="☁️ CDN-фронтинг (Cloudflare + VLESS)", callback_data="test:cdn")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def _cdn_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📖 Что нужно сделать", callback_data="test:cdn:howto")
+    kb.button(text="✏️ Задать домен/токен", callback_data="test:cdn:set")
+    kb.button(text="🔍 Проверить DNS/Cloudflare", callback_data="test:cdn:check")
+    kb.button(text="⬅️ Назад", callback_data="test:main")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -125,3 +156,76 @@ async def olcrtc_set_done(message: Message, state: FSMContext, session: AsyncSes
     await set_olcrtc_config(session, conference_id=conference_id, encryption_key=key, socks5_port=port)
     await state.clear()
     await message.answer("Сохранено.", reply_markup=_olcrtc_keyboard())
+
+
+@router.callback_query(F.data == "test:cdn")
+async def cdn_menu(callback: CallbackQuery, session: AsyncSession) -> None:
+    cfg = await get_cdn_config(session)
+    if cfg.domain:
+        status = (
+            f"Домен: <code>{cfg.domain}</code>\n"
+            f"Zone ID: <code>{cfg.cf_zone_id or '—'}</code>\n"
+            f"CF-токен: {'задан' if cfg.cf_api_token else '—'}\n"
+            f"VLESS UUID: <code>{cfg.vless_uuid or '—'}</code>\n"
+            f"WS path: <code>{cfg.ws_path or '/vless'}</code>"
+        )
+    else:
+        status = "Пока не настроено."
+
+    await callback.message.edit_text(
+        f"☁️ CDN-фронтинг — VLESS за Cloudflare\n\n{status}",
+        reply_markup=_cdn_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "test:cdn:howto")
+async def cdn_howto(callback: CallbackQuery) -> None:
+    await callback.message.answer(CDN_SETUP_TEXT)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "test:cdn:set")
+async def cdn_set_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(CdnStates.waiting_config)
+    await callback.message.edit_text(
+        "Отправьте одним сообщением через пробел: <code>домен zone_id cf_токен</code>\n"
+        "Например: <code>vpn.example.com a1b2c3... 0xAbCdEf...</code>\n\n"
+        "UUID для VLESS-клиента сгенерируется автоматически.",
+    )
+    await callback.answer()
+
+
+@router.message(CdnStates.waiting_config)
+async def cdn_set_done(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    parts = message.text.strip().split()
+    if len(parts) < 3:
+        await message.answer("Нужны домен, zone_id и токен, через пробел. Введите ещё раз:")
+        return
+
+    domain, zone_id, token = parts[0], parts[1], parts[2]
+    cfg = await get_cdn_config(session)
+    vless_uuid = cfg.vless_uuid or str(uuid.uuid4())
+
+    await set_cdn_config(
+        session,
+        domain=domain,
+        cf_zone_id=zone_id,
+        cf_api_token=token,
+        vless_uuid=vless_uuid,
+        ws_path=cfg.ws_path or "/vless",
+    )
+    await state.clear()
+    await message.answer(f"Сохранено. VLESS UUID: <code>{vless_uuid}</code>", reply_markup=_cdn_keyboard())
+
+
+@router.callback_query(F.data == "test:cdn:check")
+async def cdn_check(callback: CallbackQuery, session: AsyncSession) -> None:
+    cfg = await get_cdn_config(session)
+    if not cfg.domain:
+        await callback.answer("Сначала задай домен.", show_alert=True)
+        return
+
+    await callback.answer("Проверяю...")
+    result = await check_cdn_readiness(cfg.domain)
+    await callback.message.answer(f"🔍 {cfg.domain}\n\n{result}")

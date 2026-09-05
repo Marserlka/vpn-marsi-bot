@@ -152,6 +152,23 @@ class BotSettings(Base):
     free_period_started_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class OlcRtcLabConfig(Base):
+    """Singleton row (id=1) for the admin-only /test lab (bot/handlers/test.py)
+    — currently just remembers the manually-created Yandex Telemost
+    conference/key/port for the OlcRTC whitelist-bypass experiment (see TZ),
+    so the admin doesn't have to keep them in a notes app. Nothing here is
+    ever shown to a regular user or wired into the real protocol pickers."""
+
+    __tablename__ = "olcrtc_lab_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conference_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    encryption_key: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    socks5_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    updated_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class BalanceTransaction(Base):
     __tablename__ = "balance_transactions"
 

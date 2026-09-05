@@ -11,7 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot.config import settings
 from bot.database.db import init_db
-from bot.handlers import balance, menu, profile, purchase, start
+from bot.handlers import balance, menu, profile, purchase, start, test
 from bot.handlers.admin import build_admin_router
 from bot.middlewares.db_session import DbSessionMiddleware
 from bot.middlewares.errors import ErrorLoggingMiddleware
@@ -41,6 +41,7 @@ async def main() -> None:
     dp.include_router(balance.router)
     dp.include_router(purchase.router)
     dp.include_router(build_admin_router())
+    dp.include_router(test.router)
 
     scheduler = AsyncIOScheduler()
     register_jobs(scheduler, bot)

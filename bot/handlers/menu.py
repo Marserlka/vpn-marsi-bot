@@ -8,6 +8,7 @@ from bot.config import settings
 from bot.handlers.start import WELCOME_TEXT
 from bot.keyboards.client import back_to_menu, legal_docs_keyboard, main_menu
 from bot.services.settings import get_settings
+from bot.utils.nav import render
 
 router = Router(name="menu")
 
@@ -15,7 +16,7 @@ router = Router(name="menu")
 @router.callback_query(F.data == "menu:main")
 async def to_main_menu(callback: CallbackQuery, session: AsyncSession) -> None:
     row = await get_settings(session)
-    await callback.message.edit_text(WELCOME_TEXT, reply_markup=main_menu(row.force_sub_channel_url))
+    await render(callback, WELCOME_TEXT, main_menu(row.force_sub_channel_url))
     await callback.answer()
 
 
@@ -29,22 +30,21 @@ async def instructions(callback: CallbackQuery) -> None:
         "4. Нажмите «Подключиться».\n\n"
         "Если что-то не работает — обратитесь в поддержку."
     )
-    await callback.message.edit_text(text, reply_markup=back_to_menu())
+    await render(callback, text, back_to_menu())
     await callback.answer()
 
 
 @router.callback_query(F.data == "menu:legal")
 async def legal(callback: CallbackQuery) -> None:
-    await callback.message.edit_text(
-        "📄 Правовые документы сервиса:", reply_markup=legal_docs_keyboard()
-    )
+    await render(callback, "📄 Правовые документы сервиса:", legal_docs_keyboard())
     await callback.answer()
 
 
 @router.callback_query(F.data == "menu:support")
 async def support(callback: CallbackQuery) -> None:
-    await callback.message.edit_text(
+    await render(
+        callback,
         f"🆘 Поддержка: напишите администратору — @{settings.SUPPORT_USERNAME}",
-        reply_markup=back_to_menu(),
+        back_to_menu(),
     )
     await callback.answer()

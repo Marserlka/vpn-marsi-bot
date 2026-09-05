@@ -25,6 +25,7 @@ from bot.services.subscriptions import (
     switch_protocol,
 )
 from bot.utils.emoji import pe
+from bot.utils.nav import render
 
 router = Router(name="profile")
 
@@ -87,7 +88,7 @@ async def profile(callback: CallbackQuery, session: AsyncSession) -> None:
         f"Активных подключений: {active_count}\n\n"
         f"⚠️ Каждое подключение — 1 устройство."
     )
-    await callback.message.edit_text(text, reply_markup=profile_keyboard())
+    await render(callback, text, profile_keyboard())
     await callback.answer()
 
 
@@ -283,5 +284,5 @@ async def referral(callback: CallbackQuery, session: AsyncSession) -> None:
         f"Оплатили подписку: {paid_count or 0}\n"
         f"Заработано: {total_amount} руб." + (f", {total_days} дн." if total_days else "")
     )
-    await callback.message.edit_text(text, reply_markup=back_to_menu())
+    await render(callback, text, back_to_menu())
     await callback.answer()

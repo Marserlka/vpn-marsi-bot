@@ -141,7 +141,10 @@ async def send_connection_config(bot, chat_id: int, conn: Connection) -> None:
     WireGuard/AmneziaWG need an importable .conf file; VLESS/Shadowsocks
     are a single link that's useless as a file attachment (Telegram won't
     preview it, so the user would have to download and open it just to
-    copy one line) — send those as plain copyable text instead."""
+    copy one line) — send those as plain copyable text instead. Either way,
+    a QR code of the same content follows right after (2026-09-05, admin
+    request) — no separate button/click needed, both AmneziaVPN and the
+    official WireGuard app support importing by scanning it."""
     app_name = PROTOCOL_APP.get(conn.protocol, "приложение AmneziaVPN")
     import_hint = PROTOCOL_IMPORT_HINT.get(conn.protocol, PROTOCOL_IMPORT_HINT["amnezia"])
     limit_note = (
@@ -161,6 +164,20 @@ async def send_connection_config(bot, chat_id: int, conn: Connection) -> None:
         file = BufferedInputFile(conn.awg_config.encode(), filename=random_config_filename())
         await bot.send_document(chat_id, file, caption=f"{header}\n\n{steps}")
 
+    await _send_qr(bot, chat_id, conn)
+
+
+async def _send_qr(bot, chat_id: int, conn: Connection) -> None:
+    import io
+
+    import qrcode
+
+    img = qrcode.make(conn.awg_config)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    photo = BufferedInputFile(buf.getvalue(), filename=f"{conn.name}-qr.png")
+    await bot.send_photo(chat_id, photo, caption=f"📱 QR-код «{conn.name}» — можно отсканировать вместо файла.")
+
 
 @router.callback_query(F.data.startswith("menu:get_config:"))
 async def get_config(callback: CallbackQuery, session: AsyncSession) -> None:
@@ -171,34 +188,6 @@ async def get_config(callback: CallbackQuery, session: AsyncSession) -> None:
         return
 
     await send_connection_config(callback.bot, callback.message.chat.id, conn)
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("menu:qr:"))
-async def get_qr(callback: CallbackQuery, session: AsyncSession) -> None:
-    """QR of the same content «Получить конфиг» sends: the subscription URL
-    for VLESS/Shadowsocks, the raw wg-quick .conf text for AmneziaWG/
-    WireGuard — both AmneziaVPN and the official WireGuard app support
-    importing a config by scanning a QR code of exactly this content."""
-    conn_id = int(callback.data.split(":")[-1])
-    conn = await get_connection(session, conn_id, callback.from_user.id)
-    if not conn or not conn.awg_config or conn.status != "active":
-        await callback.answer("Нет активного конфига.", show_alert=True)
-        return
-
-    import io
-
-    import qrcode
-
-    img = qrcode.make(conn.awg_config)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    photo = BufferedInputFile(buf.getvalue(), filename=f"{conn.name}-qr.png")
-    await callback.bot.send_photo(
-        callback.message.chat.id,
-        photo,
-        caption=f"📱 QR-код «{conn.name}» — отсканируйте в приложении при добавлении конфигурации.",
-    )
     await callback.answer()
 
 

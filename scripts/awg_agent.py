@@ -48,6 +48,8 @@ Optional:
                 see the PROTOCOLS["amnezia"] comment below)
   AWG_STATE_DIR (default /etc/amnezia/amneziawg — always a host path; our
                 own peers.json bookkeeping never lives inside the container)
+  AWG_RATE_LIMIT_MBIT (default 25 — per-peer speed cap via tc, amnezia only;
+                0 disables it)
   AWG_INTERFACE (default awg0)
   AWG_SUBNET (default 10.29.29.0/24)
   AWG_BIN (default /usr/bin/awg)
@@ -65,7 +67,7 @@ import os
 import ssl
 import subprocess
 import threading
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 TOKEN = os.environ["AWG_AGENT_TOKEN"]
 CERT_FILE = os.environ["AWG_TLS_CERTFILE"]
@@ -118,6 +120,17 @@ PROTOCOLS = {
         # peers.json is bot-agent bookkeeping only — always kept on the host,
         # never inside the (disposable) container.
         "state_dir": os.environ.get("AWG_STATE_DIR", "/etc/amnezia/amneziawg"),
+        # Per-connection speed cap (2026-09-05): a single AmneziaWG peer
+        # saturating its link costs disproportionate CPU (obfuscation's
+        # per-packet header-substitution overhead, measured ~60% more than
+        # plain WireGuard per Gbit/s — see TZ). 25mbit comfortably covers
+        # normal use (4K streaming tops out around 15-25mbit) while making
+        # torrenting/bulk-transfer/speedtest-style abuse cost ~nothing —
+        # measured CPU during a saturating iperf3 run dropped from 60-88%
+        # unlimited to single digits at this cap. Not applied to plain
+        # WireGuard (much cheaper per-packet, and it's the "full speed"
+        # option by design). 0/unset disables rate limiting entirely.
+        "rate_limit_mbit": int(os.environ.get("AWG_RATE_LIMIT_MBIT", "25")),
     },
     "wireguard": {
         "dir": os.environ.get("WG_CONF_DIR", "/etc/wireguard"),
@@ -131,6 +144,7 @@ PROTOCOLS = {
         "client_params": "MTU = 1280\n",
         "docker_container": "",
         "state_dir": os.environ.get("WG_CONF_DIR", "/etc/wireguard"),
+        "rate_limit_mbit": 0,
     },
 }
 
@@ -199,6 +213,59 @@ def _run(cmd: list[str], input_data: str | None = None) -> str:
     return result.stdout.strip()
 
 
+_qdisc_ready: set[str] = set()
+
+
+def _ensure_qdisc(p: dict) -> None:
+    """Per-peer rate limiting uses tc filters on a clsact qdisc (handles both
+    ingress and egress without needing a separate ifb device). Idempotent —
+    tc errors if the qdisc already exists, which we just ignore."""
+    iface = p["interface"]
+    if iface in _qdisc_ready:
+        return
+    subprocess.run(_tool_cmd(p, ["tc", "qdisc", "add", "dev", iface, "clsact"]), check=False,
+                   capture_output=True)
+    _qdisc_ready.add(iface)
+
+
+def _ip_pref(ip: str) -> str:
+    """Use the peer's own last octet as the tc filter pref/handle — unique
+    per peer (address pool is one /24) and lets us delete a specific peer's
+    filters later without tracking handles separately."""
+    return ip.rsplit(".", 1)[-1]
+
+
+def _add_rate_limit(p: dict, ip: str) -> None:
+    mbit = p.get("rate_limit_mbit", 0)
+    if not mbit:
+        return
+    _ensure_qdisc(p)
+    pref = _ip_pref(ip)
+    burst = max(2, mbit // 4)
+    iface = p["interface"]
+    _run(_tool_cmd(p, [
+        "tc", "filter", "add", "dev", iface, "egress", "protocol", "ip", "prio", pref,
+        "flower", "dst_ip", f"{ip}/32",
+        "action", "police", "rate", f"{mbit}mbit", "burst", f"{burst}m", "conform-exceed", "drop/pipe",
+    ]))
+    _run(_tool_cmd(p, [
+        "tc", "filter", "add", "dev", iface, "ingress", "protocol", "ip", "prio", pref,
+        "flower", "src_ip", f"{ip}/32",
+        "action", "police", "rate", f"{mbit}mbit", "burst", f"{burst}m", "conform-exceed", "drop/pipe",
+    ]))
+
+
+def _remove_rate_limit(p: dict, ip: str) -> None:
+    if not p.get("rate_limit_mbit", 0):
+        return
+    pref = _ip_pref(ip)
+    iface = p["interface"]
+    subprocess.run(_tool_cmd(p, ["tc", "filter", "del", "dev", iface, "egress", "prio", pref]),
+                   check=False, capture_output=True)
+    subprocess.run(_tool_cmd(p, ["tc", "filter", "del", "dev", iface, "ingress", "prio", pref]),
+                   check=False, capture_output=True)
+
+
 def create_peer(label: str, protocol: str) -> dict:
     if protocol not in PROTOCOLS:
         raise ValueError(f"unknown protocol: {protocol}")
@@ -218,6 +285,7 @@ def create_peer(label: str, protocol: str) -> dict:
         state["peers"][pub] = {"label": label, "ip": ip, "psk": psk}
         _save_state(p, state)
         _persist_conf(p, state)
+        _add_rate_limit(p, ip)
 
         client_config = (
             "[Interface]\n"
@@ -243,7 +311,9 @@ def delete_peer(pubkey: str, protocol: str) -> bool:
         state = _load_state(p)
         if pubkey not in state["peers"]:
             return False
+        ip = state["peers"][pubkey]["ip"]
         subprocess.run(_tool_cmd(p, [p["bin"], "set", p["interface"], "peer", pubkey, "remove"]), check=False)
+        _remove_rate_limit(p, ip)
         del state["peers"][pubkey]
         _save_state(p, state)
         _persist_conf(p, state)
@@ -303,7 +373,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not parsed.path.startswith(prefix):
             self._json(404, {"error": "not found"})
             return
-        pubkey = parsed.path[len(prefix):]
+        pubkey = unquote(parsed.path[len(prefix):])
         protocol = parse_qs(parsed.query).get("protocol", ["amnezia"])[0]
         try:
             ok = delete_peer(pubkey, protocol)
@@ -340,7 +410,41 @@ class TLSServer(http.server.ThreadingHTTPServer):
         return wrapped, addr
 
 
+def _reconcile_rate_limits() -> None:
+    """Re-applies every known peer's tc rate limit on agent startup. The tc
+    filters live inside the (disposable) container's netns, not in any file
+    we persist, so a container restart (crash, host reboot, a redeploy like
+    2026-09-05's) silently drops them even though the peers themselves
+    survive via awg0.conf. Idempotent — an already-present filter with the
+    same pref just errors, which we ignore here (unlike _add_rate_limit,
+    which stays strict for the normal create-peer path)."""
+    for p in PROTOCOLS.values():
+        if not p.get("rate_limit_mbit"):
+            continue
+        state = _load_state(p)
+        if not state["peers"]:
+            continue
+        _ensure_qdisc(p)
+        mbit = p["rate_limit_mbit"]
+        burst = max(2, mbit // 4)
+        iface = p["interface"]
+        for info in state["peers"].values():
+            ip = info["ip"]
+            pref = _ip_pref(ip)
+            subprocess.run(_tool_cmd(p, [
+                "tc", "filter", "add", "dev", iface, "egress", "protocol", "ip", "prio", pref,
+                "flower", "dst_ip", f"{ip}/32",
+                "action", "police", "rate", f"{mbit}mbit", "burst", f"{burst}m", "conform-exceed", "drop/pipe",
+            ]), check=False, capture_output=True)
+            subprocess.run(_tool_cmd(p, [
+                "tc", "filter", "add", "dev", iface, "ingress", "protocol", "ip", "prio", pref,
+                "flower", "src_ip", f"{ip}/32",
+                "action", "police", "rate", f"{mbit}mbit", "burst", f"{burst}m", "conform-exceed", "drop/pipe",
+            ]), check=False, capture_output=True)
+
+
 def main() -> None:
+    _reconcile_rate_limits()
     port = int(os.environ.get("AWG_AGENT_PORT", "443"))
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(CERT_FILE, KEY_FILE)

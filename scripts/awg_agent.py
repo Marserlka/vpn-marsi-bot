@@ -78,8 +78,20 @@ KEY_FILE = os.environ["AWG_TLS_KEYFILE"]
 # the app genuinely doesn't parse S3/S4/I1-I3. Stick to the subset it
 # accepts: MTU, PresharedKey (set per-peer below), Jc/Jmin/Jmax/S1/S2, and
 # single-value H1-H4.
+#
+# MTU raised 1280->1420 on 2026-09-05 (matches the official container's own
+# default): measured ~21% lower CPU per Gbit/s in an iperf3 comparison,
+# since AmneziaWG's per-packet header-substitution overhead is amortized
+# over more payload per packet. 1420 is close to the practical ceiling —
+# standard internet paths cap at 1500 bytes and WireGuard's own encapsulation
+# (~60 bytes: outer IP+UDP+WG header+Poly1305 tag) eats most of the rest, so
+# going higher risks outer-packet IP fragmentation. Real risk on THIS value:
+# mobile carriers often have their own tunneling (GTP etc.) that lowers the
+# effective path MTU below 1420, which would blackhole large packets rather
+# than fragment them cleanly — watch for "connects but hangs on big transfers"
+# reports and drop back toward 1280 (or an intermediate value) if that shows up.
 AMNEZIA_CLIENT_PARAMS = (
-    "MTU = 1280\n"
+    "MTU = 1420\n"
     "Jc = 9\nJmin = 30\nJmax = 90\nS1 = 110\nS2 = 120\n"
     "H1 = 5000000\nH2 = 10000001\nH3 = 20000001\nH4 = 30000001\n"
 )

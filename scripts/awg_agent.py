@@ -29,6 +29,7 @@ Endpoints:
                                -> creates a peer, returns
                                {"public_key", "ip", "client_config"}
   DELETE /peers/<pubkey>?protocol=amnezia|wireguard   removes a peer
+  GET    /peers/status?protocol=amnezia|wireguard     per-peer handshake/transfer stats (admin "who's online")
 
 Required environment variables:
   AWG_AGENT_TOKEN          bearer token clients must send in Authorization header
@@ -318,6 +319,37 @@ def create_peer(label: str, protocol: str) -> dict:
         return {"public_key": pub, "ip": ip, "client_config": client_config}
 
 
+def get_status(protocol: str) -> list[dict]:
+    """Per-peer liveness for the admin "who's online" panel — `wg show
+    <iface> dump` gives handshake/transfer stats for every peer in one
+    call. latest_handshake=0 means "never handshaked" (peer created but
+    the client hasn't connected, or connected long enough ago that we
+    just don't know — wg keeps this per-process, not persisted)."""
+    if protocol not in PROTOCOLS:
+        raise ValueError(f"unknown protocol: {protocol}")
+    p = PROTOCOLS[protocol]
+    state = _load_state(p)
+    try:
+        dump = _run(_tool_cmd(p, [p["bin"], "show", p["interface"], "dump"]))
+    except subprocess.CalledProcessError:
+        return []
+    result = []
+    for line in dump.splitlines()[1:]:  # first line is the interface itself, not a peer
+        parts = line.split("\t")
+        if len(parts) < 8:
+            continue
+        pubkey, _psk, _endpoint, _allowed_ips, latest_handshake, rx, tx, _keepalive = parts[:8]
+        info = state["peers"].get(pubkey, {})
+        result.append({
+            "public_key": pubkey,
+            "label": info.get("label", ""),
+            "latest_handshake": int(latest_handshake),
+            "rx_bytes": int(rx),
+            "tx_bytes": int(tx),
+        })
+    return result
+
+
 def delete_peer(pubkey: str, protocol: str) -> bool:
     if protocol not in PROTOCOLS:
         raise ValueError(f"unknown protocol: {protocol}")
@@ -361,6 +393,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/health":
             self._json(200, {"status": "ok"})
+            return
+        parsed = urlparse(self.path)
+        if parsed.path == "/peers/status":
+            if not self._auth_ok():
+                self._json(401, {"error": "unauthorized"})
+                return
+            protocol = parse_qs(parsed.query).get("protocol", ["amnezia"])[0]
+            try:
+                self._json(200, {"peers": get_status(protocol)})
+            except Exception as exc:
+                self._json(500, {"error": str(exc)})
             return
         self._json(404, {"error": "not found"})
 

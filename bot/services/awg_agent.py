@@ -37,5 +37,13 @@ class AwgAgentClient:
         if resp.status_code not in (200, 404):
             raise AwgAgentError(f"delete_peer failed: {resp.status_code} {resp.text}")
 
+    async def get_status(self, protocol: str) -> list[dict]:
+        """Per-peer handshake/transfer stats for the admin "who's online"
+        panel — see bot/handlers/admin/activity.py."""
+        resp = await self._client.get("/peers/status", params={"protocol": protocol})
+        if resp.status_code != 200:
+            raise AwgAgentError(f"get_status failed: {resp.status_code} {resp.text}")
+        return resp.json()["peers"]
+
 
 awg_agent = AwgAgentClient()

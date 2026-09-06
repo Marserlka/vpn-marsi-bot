@@ -135,6 +135,22 @@ class MarzbanClient:
             raise
         return resp.json()
 
+    async def list_users(self) -> list[dict]:
+        """Bulk fetch for the admin "who's online" panel — each entry has
+        `online_at` (ISO timestamp of last traffic, or null if never seen)."""
+        users: list[dict] = []
+        offset = 0
+        limit = 200
+        while True:
+            resp = await self._request("GET", "/api/users", params={"limit": limit, "offset": offset})
+            data = resp.json()
+            batch = data.get("users", [])
+            users.extend(batch)
+            if len(batch) < limit or len(users) >= data.get("total", len(users)):
+                break
+            offset += limit
+        return users
+
     async def modify_expire(self, username: str, expire_at: dt.datetime, status: str = "active") -> dict:
         payload = {"expire": int(expire_at.timestamp()), "status": status}
         resp = await self._request("PUT", f"/api/user/{username}", json=payload)

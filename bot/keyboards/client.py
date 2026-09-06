@@ -15,9 +15,13 @@ PROTOCOL_CHOICES = {
     "amnezia": "AmneziaWG (маскировка)",
     "vless": "VLESS-Reality",
 }
-# Netherlands added 2026-09-06 — VLESS/Shadowsocks only, no AmneziaWG/WireGuard
-# agent there (see bot/services/subscriptions.py:WG_REGION).
-REGION_CHOICES = {"de": "🇩🇪 Германия", "nl": "🇳🇱 Нидерланды"}
+# Netherlands added 2026-09-06, VLESS/Shadowsocks only — pulled from the
+# picker the same day: new connections there were throwing (admin report,
+# investigating), and separately its Reality connections turned out to be
+# unreliable for at least one real user's network even when creation
+# didn't crash. Not removed from REGION_LABELS (profile.py) — existing NL
+# connections still display fine, this only stops new ones being chosen.
+REGION_CHOICES = {"de": "🇩🇪 Германия"}
 WG_FAMILY_REGIONS = {"de": REGION_CHOICES["de"]}
 
 

@@ -28,12 +28,26 @@ class MarzbanClient:
     scope for the initial VLESS/SS rollout.
     """
 
-    def __init__(self, base_url: str, username: str, password: str, inbound_tag: str, ss_inbound_tag: str) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        username: str,
+        password: str,
+        inbound_tag: str,
+        ss_inbound_tag: str,
+        sub_base_url: str = "",
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._username = username
         self._password = password
         self._inbound_tag = inbound_tag
         self._ss_inbound_tag = ss_inbound_tag
+        # The public URL clients actually fetch subscriptions from — the
+        # happ_sub_proxy sidecar in front of Marzban when configured (see
+        # scripts/happ_sub_proxy.py, TZ 2026-09-06), otherwise Marzban
+        # itself (works fine, just without the auto-applied Happ routing
+        # rules). Admin API calls always go to `base_url` regardless.
+        self._sub_base_url = (sub_base_url or base_url).rstrip("/")
         self._token: str | None = None
         self._token_expires_at: float = 0.0
         self._client = httpx.AsyncClient(base_url=self._base_url, timeout=15.0)
@@ -41,6 +55,10 @@ class MarzbanClient:
     @property
     def base_url(self) -> str:
         return self._base_url
+
+    @property
+    def sub_base_url(self) -> str:
+        return self._sub_base_url
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -177,6 +195,7 @@ marzban_client = MarzbanClient(
     settings.MARZBAN_ADMIN_PASSWORD,
     settings.MARZBAN_INBOUND_TAG,
     settings.MARZBAN_SS_INBOUND_TAG,
+    settings.MARZBAN_SUB_BASE_URL,
 )
 marzban_client_nl = MarzbanClient(
     settings.MARZBAN_NL_BASE_URL,
@@ -184,6 +203,7 @@ marzban_client_nl = MarzbanClient(
     settings.MARZBAN_NL_ADMIN_PASSWORD,
     settings.MARZBAN_NL_INBOUND_TAG,
     settings.MARZBAN_NL_SS_INBOUND_TAG,
+    settings.MARZBAN_NL_SUB_BASE_URL,
 )
 
 # Keyed by Connection.region — see bot/services/subscriptions.py:_provision.

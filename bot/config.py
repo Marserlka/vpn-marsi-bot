@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     MARZBAN_INBOUND_TAG: str = "VLESS-Reality"
     MARZBAN_SS_INBOUND_TAG: str = "Shadowsocks-TCP"
     MARZBAN_SNI_MASK: str = "sap.com"
+    # Public subscription URL clients actually fetch — the happ_sub_proxy
+    # sidecar (scripts/happ_sub_proxy.py, see TZ 2026-09-06) in front of
+    # Marzban's own subscription endpoint, which adds the Happ routing
+    # deeplink header. Falls back to MARZBAN_BASE_URL (Marzban directly, no
+    # auto-applied routing rules) if left unset.
+    MARZBAN_SUB_BASE_URL: str = ""
 
     # Netherlands (Amsterdam) — second region ("nl"), added 2026-09-06. Only
     # VLESS/Shadowsocks live here (no AmneziaWG/WireGuard agent on this VPS),
@@ -28,6 +34,7 @@ class Settings(BaseSettings):
     MARZBAN_NL_INBOUND_TAG: str = "VLESS-Reality"
     MARZBAN_NL_SS_INBOUND_TAG: str = "Shadowsocks-TCP"
     MARZBAN_NL_SNI_MASK: str = "docker.com"
+    MARZBAN_NL_SUB_BASE_URL: str = ""
 
     # AmneziaWG peer-management agent (default protocol — see TZ 3.2 for why
     # VLESS-Reality was originally demoted, and TZ 3.4 for why it's back as

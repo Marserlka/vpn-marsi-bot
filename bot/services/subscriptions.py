@@ -46,7 +46,7 @@ async def _provision(user_id: int, protocol: str, region: str) -> tuple[str, str
     if protocol in MARZBAN_FAMILY:
         client = get_marzban_client(region)
         user = await client.create_user(label, None, protocol=protocol)
-        sub_url = client.subscription_url_from(user, client.base_url)
+        sub_url = client.subscription_url_from(user, client.sub_base_url)
         return label, sub_url
     raise ValueError(f"unknown protocol: {protocol}")
 

@@ -18,7 +18,7 @@ from bot.middlewares.errors import ErrorLoggingMiddleware
 from bot.middlewares.force_subscribe import ForceSubscribeMiddleware
 from bot.scheduler.jobs import register_jobs
 from bot.services.awg_agent import awg_agent
-from bot.services.marzban import marzban_client
+from bot.services.marzban import marzban_client, marzban_client_nl
 from bot.utils.logging import setup_logging
 
 logger = logging.getLogger("bot.main")
@@ -63,6 +63,7 @@ async def main() -> None:
     finally:
         scheduler.shutdown(wait=False)
         await marzban_client.close()
+        await marzban_client_nl.close()
         await awg_agent.close()
         await bot.session.close()
 

@@ -18,7 +18,7 @@ from bot.keyboards.client import (
     create_region_keyboard,
     legal_docs_keyboard,
 )
-from bot.services.subscriptions import MARZBAN_FAMILY, charge_connection_day, create_connection
+from bot.services.subscriptions import charge_connection_day, create_connection
 from bot.utils.emoji import pe
 
 logger = logging.getLogger("bot.purchase")
@@ -54,19 +54,10 @@ async def create_name_entered(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data.startswith("create:protocol:"))
-async def create_protocol_chosen(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+async def create_protocol_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     protocol = callback.data.split(":")[-1]
     await state.update_data(protocol=protocol)
-
-    # VLESS/Shadowsocks are delivered as one Marzban subscription URL that
-    # bundles every inbound the user is assigned to (see subscriptions.py:
-    # _provision) — there's nothing to pick a single region *for* the way
-    # there is for a WireGuard-family peer bound to one specific server, so
-    # skip straight to the confirm screen instead of asking (2026-09-05).
-    if protocol in MARZBAN_FAMILY:
-        await _show_create_confirm(callback, state, session, "all")
-    else:
-        await callback.message.edit_text("Выберите регион сервера:", reply_markup=create_region_keyboard())
+    await callback.message.edit_text("Выберите регион сервера:", reply_markup=create_region_keyboard(protocol))
     await callback.answer()
 
 

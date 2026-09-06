@@ -11,12 +11,23 @@ class Settings(BaseSettings):
 
     DB_URL: str = "sqlite+aiosqlite:///./vpn_marsi.db"
 
+    # Germany (Frankfurt) — the original/primary region ("de")
     MARZBAN_BASE_URL: str = ""
     MARZBAN_ADMIN_USERNAME: str = ""
     MARZBAN_ADMIN_PASSWORD: str = ""
     MARZBAN_INBOUND_TAG: str = "VLESS-Reality"
     MARZBAN_SS_INBOUND_TAG: str = "Shadowsocks-TCP"
     MARZBAN_SNI_MASK: str = "sap.com"
+
+    # Netherlands (Amsterdam) — second region ("nl"), added 2026-09-06. Only
+    # VLESS/Shadowsocks live here (no AmneziaWG/WireGuard agent on this VPS),
+    # see bot/keyboards/client.py's region picker filtering by protocol.
+    MARZBAN_NL_BASE_URL: str = ""
+    MARZBAN_NL_ADMIN_USERNAME: str = ""
+    MARZBAN_NL_ADMIN_PASSWORD: str = ""
+    MARZBAN_NL_INBOUND_TAG: str = "VLESS-Reality"
+    MARZBAN_NL_SS_INBOUND_TAG: str = "Shadowsocks-TCP"
+    MARZBAN_NL_SNI_MASK: str = "docker.com"
 
     # AmneziaWG peer-management agent (default protocol — see TZ 3.2 for why
     # VLESS-Reality was originally demoted, and TZ 3.4 for why it's back as

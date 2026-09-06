@@ -15,7 +15,10 @@ PROTOCOL_CHOICES = {
     "amnezia": "AmneziaWG (маскировка)",
     "vless": "VLESS-Reality",
 }
-REGION_CHOICES = {"de": "🇩🇪 Германия"}
+# Netherlands added 2026-09-06 — VLESS/Shadowsocks only, no AmneziaWG/WireGuard
+# agent there (see bot/services/subscriptions.py:WG_REGION).
+REGION_CHOICES = {"de": "🇩🇪 Германия", "nl": "🇳🇱 Нидерланды"}
+WG_FAMILY_REGIONS = {"de": REGION_CHOICES["de"]}
 
 
 def main_menu(news_channel_url: str | None = None) -> InlineKeyboardMarkup:
@@ -114,9 +117,10 @@ def create_protocol_keyboard() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def create_region_keyboard() -> InlineKeyboardMarkup:
+def create_region_keyboard(protocol: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    for region, label in REGION_CHOICES.items():
+    choices = REGION_CHOICES if protocol in ("vless", "ss") else WG_FAMILY_REGIONS
+    for region, label in choices.items():
         kb.button(text=label, callback_data=f"create:region:{region}")
     kb.button(text="Отмена", callback_data="menu:connections", icon_custom_emoji_id=PE_ID["back"])
     kb.adjust(1)

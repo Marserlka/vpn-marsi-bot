@@ -28,13 +28,19 @@ class MarzbanClient:
     scope for the initial VLESS/SS rollout.
     """
 
-    def __init__(self) -> None:
-        self._base_url = settings.MARZBAN_BASE_URL.rstrip("/")
-        self._username = settings.MARZBAN_ADMIN_USERNAME
-        self._password = settings.MARZBAN_ADMIN_PASSWORD
+    def __init__(self, base_url: str, username: str, password: str, inbound_tag: str, ss_inbound_tag: str) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._username = username
+        self._password = password
+        self._inbound_tag = inbound_tag
+        self._ss_inbound_tag = ss_inbound_tag
         self._token: str | None = None
         self._token_expires_at: float = 0.0
         self._client = httpx.AsyncClient(base_url=self._base_url, timeout=15.0)
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -96,10 +102,10 @@ class MarzbanClient:
         """
         if protocol == "ss":
             proxies = {"shadowsocks": {"method": "aes-256-gcm"}}
-            inbounds = {"shadowsocks": [settings.MARZBAN_SS_INBOUND_TAG]}
+            inbounds = {"shadowsocks": [self._ss_inbound_tag]}
         else:
             proxies = {"vless": {"flow": "xtls-rprx-vision"}}
-            inbounds = {"vless": [settings.MARZBAN_INBOUND_TAG]}
+            inbounds = {"vless": [self._inbound_tag]}
         payload = {
             "username": username,
             "proxies": proxies,
@@ -149,4 +155,24 @@ class MarzbanClient:
         return f"{base_url.rstrip('/')}{sub_path}"
 
 
-marzban_client = MarzbanClient()
+marzban_client = MarzbanClient(
+    settings.MARZBAN_BASE_URL,
+    settings.MARZBAN_ADMIN_USERNAME,
+    settings.MARZBAN_ADMIN_PASSWORD,
+    settings.MARZBAN_INBOUND_TAG,
+    settings.MARZBAN_SS_INBOUND_TAG,
+)
+marzban_client_nl = MarzbanClient(
+    settings.MARZBAN_NL_BASE_URL,
+    settings.MARZBAN_NL_ADMIN_USERNAME,
+    settings.MARZBAN_NL_ADMIN_PASSWORD,
+    settings.MARZBAN_NL_INBOUND_TAG,
+    settings.MARZBAN_NL_SS_INBOUND_TAG,
+)
+
+# Keyed by Connection.region — see bot/services/subscriptions.py:_provision.
+MARZBAN_CLIENTS: dict[str, MarzbanClient] = {"de": marzban_client, "nl": marzban_client_nl}
+
+
+def get_marzban_client(region: str) -> MarzbanClient:
+    return MARZBAN_CLIENTS.get(region, marzban_client)
